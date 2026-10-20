@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Испанский каждый день</title>
+  <!-- Telegram Web App API: подключается первым, в обычном браузере просто не активируется -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ===== ЭКРАН: ГЛАВНАЯ ===== -->
+    <section id="screen-home" class="screen">
+      <div id="export-banner" class="banner hidden">
+        <p><b>Сделай экспорт базы.</b> Прогресс хранится только в этом браузере — сохраняй бэкап раз в неделю.</p>
+        <div class="banner-btns">
+          <button id="banner-export" class="btn-primary">Экспортировать</button>
+          <button id="banner-later" class="btn-ghost">Позже</button>
+        </div>
+      </div>
+      <div class="hero">
+        <h1>Испанский<br>каждый день</h1>
+        <p class="subtitle">Твой личный тренажёр слов</p>
+      </div>
+      <div class="stat-grid">
+        <div class="stat-card"><div class="stat-value" id="home-learned">0</div><div class="stat-label">выучено</div></div>
+        <div class="stat-card"><div class="stat-value" id="home-queue">0</div><div class="stat-label">в очереди</div></div>
+        <div class="stat-card"><div class="stat-value" id="home-streak">0</div><div class="stat-label">стрик, дней</div></div>
+        <div class="stat-card"><div class="stat-value" id="home-accuracy">–</div><div class="stat-label">точность за неделю</div></div>
+      </div>
+      <button id="btn-start-train" class="btn-primary big">Начать тренировку</button>
+      <p class="hint center" id="home-session-hint"></p>
+      <p class="hint center" id="home-empty" style="display:none">База пуста — добавь слова во вкладке «Слова».</p>
+    </section>
+
+    <!-- ===== ЭКРАН: ТРЕНИРОВКА ===== -->
+    <section id="screen-train" class="screen hidden">
+      <div class="train-top">
+        <button id="btn-exit-train" class="btn-ghost">Выход</button>
+        <div id="train-progress" class="train-progress"></div>
+      </div>
+      <div id="train-area"></div>
+    </section>
+
+    <!-- ===== ЭКРАН: СТАТИСТИКА ===== -->
+    <section id="screen-stats" class="screen hidden">
+      <h2>Статистика</h2>
+      <div class="segmented" id="period-switch">
+        <button data-period="week" class="active">Неделя</button>
+        <button data-period="month">Месяц</button>
+        <button data-period="all">Всё время</button>
+      </div>
+      <div class="card">
+        <h3>Активность по дням</h3>
+        <canvas id="chart-activity" height="220"></canvas>
+        <div id="activity-empty" class="empty hidden">Пока нет данных за этот период</div>
+      </div>
+      <div class="card">
+        <h3>Прогресс базы</h3>
+        <canvas id="chart-status" height="220"></canvas>
+      </div>
+      <div class="card">
+        <h3>Точность по режимам</h3>
+        <p class="hint">За выбранный период</p>
+        <div id="modes-accuracy"></div>
+      </div>
+      <div class="card">
+        <h3>Сложные слова</h3>
+        <p class="hint">Где ты чаще всего ошибаешься (за всё время)</p>
+        <div id="worst-words"></div>
+        <button id="btn-train-worst" class="btn-secondary hidden">Потренировать именно их</button>
+      </div>
+    </section>
+
+    <!-- ===== ЭКРАН: СЛОВА ===== -->
+    <section id="screen-words" class="screen hidden">
+      <h2>Мои слова</h2>
+      <div class="card">
+        <h3>Добавить слово</h3>
+        <input id="add-es" placeholder="Испанское слово или выражение" maxlength="100">
+        <input id="add-ru" placeholder="Перевод на русский" maxlength="200">
+        <input id="add-tr" placeholder="Транскрипция кириллицей (необязательно)" maxlength="100">
+        <input id="add-ex" placeholder="Пример употребления (необязательно)" maxlength="200">
+        <button id="btn-add-word" class="btn-primary">Добавить слово</button>
+        <div id="add-msg" class="form-msg"></div>
+      </div>
+      <input id="word-search" placeholder="Поиск по списку...">
+      <div id="words-count" class="hint"></div>
+      <div id="words-list"></div>
+    </section>
+
+    <!-- ===== ЭКРАН: ИМПОРТ И БЭКАП ===== -->
+    <section id="screen-import" class="screen hidden">
+      <h2>Импорт и бэкап</h2>
+      <div class="card">
+        <h3>Импорт слов из JSON</h3>
+        <p class="hint">Вставь JSON в формате приложения: массив записей с полями es, ru, tr, ex. Дубликаты и битые записи не добавятся.</p>
+        <textarea id="import-json" rows="7" placeholder='[{"es":"hola","ru":"привет","tr":"ола","ex":"Hola, ¿qué tal?"}]'></textarea>
+        <button id="btn-import" class="btn-primary">Импортировать</button>
+        <div id="import-report" class="form-msg"></div>
+      </div>
+      <div class="card">
+        <h3>Импорт через ИИ-чат</h3>
+        <p class="hint">Нажми кнопку — в буфер скопируется готовый промт. Вставь его в любой ИИ-чат вместе со своим сырым списком слов, получи в ответ JSON и вернись в поле выше.</p>
+        <button id="btn-copy-prompt" class="btn-secondary">Скопировать промт для ИИ</button>
+      </div>
+      <div class="card">
+        <h3>Бэкап</h3>
+        <button id="btn-export" class="btn-primary">Экспортировать всё (бэкап)</button>
+        <p class="hint">Файл сохранится в загрузки. Храни его в надёжном месте.</p>
+        <p class="hint"><b>Восстановление:</b> выбери файл бэкапа и нажми кнопку.</p>
+        <input type="file" id="import-backup-file" accept=".json,application/json">
+        <button id="btn-restore" class="btn-danger">Восстановить из файла</button>
+        <div id="restore-msg" class="form-msg"></div>
+      </div>
+    </section>
+
+    <!-- ===== ЭКРАН: НАСТРОЙКИ ===== -->
+    <section id="screen-settings" class="screen hidden">
+      <h2>Настройки</h2>
+      <div class="card">
+        <h3>Связь с ботом</h3>
+        <label for="set-url">URL веб-приложения Apps Script</label>
+        <input id="set-url" placeholder="https://script.google.com/macros/s/.../exec">
+        <label for="set-chat">Мой chat_id</label>
+        <input id="set-chat" placeholder="например 123456789">
+        <p class="hint">chat_id бот пришлёт в ответ на команду /start. При открытии из Telegram он подставится автоматически.</p>
+        <button id="btn-save-settings" class="btn-primary">Сохранить</button>
+        <button id="btn-test" class="btn-secondary">Проверить связь</button>
+        <div id="settings-msg" class="form-msg"></div>
+      </div>
+      <div class="card">
+        <h3>Важно про данные</h3>
+        <p class="hint">Прогресс хранится в этом браузере (localStorage). Очистка данных сайта удалит его — делай бэкап раз в неделю.</p>
+      </div>
+    </section>
+
+    <!-- ===== НИЖНЯЯ НАВИГАЦИЯ ===== -->
+    <nav class="tabbar">
+      <button class="tab active" data-screen="home">Главная</button>
+      <button class="tab" data-screen="train">Учить</button>
+      <button class="tab" data-screen="stats">Статы</button>
+      <button class="tab" data-screen="words">Слова</button>
+      <button class="tab" data-screen="import">Импорт</button>
+      <button class="tab" data-screen="settings">Настройки</button>
+    </nav>
+
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="words.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
