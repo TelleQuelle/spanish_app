@@ -680,6 +680,7 @@ function renderChoiceCard(area, item) {
   card.innerHTML = html;
   area.appendChild(card);
 
+  const correct = item.mode === 'choice_es_ru' ? w.ru : w.es;
   appendOptions(area, item, options, correct);
   const sp = el('speak');
   if (sp) sp.addEventListener('click', function () { speak(w.es); });
