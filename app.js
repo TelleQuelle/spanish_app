@@ -1,12 +1,21 @@
 'use strict';
 /* ============================================================
-   ОСНОВНАЯ ЛОГИКА «Испанский каждый день» — версия 2.1
-   Правки против 2.0:
-   - графики рисуются в контейнерах с фиксированной высотой
-     (chart-box) — исправлен бесконечный рост страницы;
-   - в Telegram добавляется отступ сверху (класс in-telegram),
-     чтобы контент не уходил под системную шапку;
-   - убран мёртвый вспомогательный код.
+   ОСНОВНАЯ ЛОГИКА «Испанский каждый день» — версия 3
+   Правки против 2.1:
+   - правила: карточка «теория и сразу вопрос», лестницу двигает
+     только ответ на вопрос (кнопки «Понятно»-зачёт больше нет);
+   - размер сессии настраивается: 10/20/30/40/50 карточек;
+   - спряжение в двух форматах: «выбери форму» (лёгкий) и
+     «впиши форму» (сложный, при ошибке — таблица всех форм);
+   - примеры употребления: новые форматы «выбери слово к пропуску»
+     и «переведи пример» (поле exRu — перевод примера);
+   - «вспомни сам» в обе стороны (recall и recall_ru);
+   - кнопка «Не знаю» в форматах с ручным вводом;
+   - первые два показа записи — всегда лёгкие форматы;
+   - ошибка больше НЕ возвращает запись в текущую сессию:
+     сброс лестницы, следующий показ — в следующей тренировке;
+   - стартовым записям дозаполняется exRu из words.js (прогресс
+     сохраняется, база не сбрасывается).
    ============================================================ */
 
 // ---------- Telegram WebApp: безопасная обёртка ----------
@@ -51,31 +60,42 @@ const DAY_MS = 86400000;
 const STORAGE_KEY = 'spanishApp.v1';
 const INTERVALS = [1, 3, 7, 16, 35];   // лестница интервалов, дней (interval = индекс ступени)
 const MAINTENANCE_DAYS = 75;           // период обслуживания выученных
-const SESSION_SIZE = 10;               // максимум базовых карточек в сессии
+const SESSION_SIZE_DEFAULT = 10;       // размер сессии по умолчанию
+const SESSION_SIZES = [10, 20, 30, 40, 50];
 const NEW_LIMIT_DEFAULT = 5;
 
 const TYPES = ['word', 'verb', 'phrase', 'rule'];
 const TYPE_LABELS = { word: 'Слова', verb: 'Глаголы', phrase: 'Выражения', rule: 'Правила' };
 
-// Разрешённые форматы по типам записей
+// Все разрешённые форматы по типам записей
 const FORMATS_BY_TYPE = {
-  word: ['choice_es_ru', 'choice_ru_es', 'type_translation', 'recall', 'build_phrase', 'fill_gap'],
-  verb: ['choice_es_ru', 'choice_ru_es', 'type_translation', 'recall', 'build_phrase', 'fill_gap', 'conjugation'],
-  phrase: ['choice_es_ru', 'recall', 'build_phrase', 'fill_gap'],
-  rule: ['rule_theory', 'rule_choice']
+  word: ['choice_es_ru', 'choice_ru_es', 'type_translation', 'recall', 'recall_ru', 'build_phrase', 'fill_gap', 'gap_choice', 'translate_ex'],
+  verb: ['choice_es_ru', 'choice_ru_es', 'type_translation', 'recall', 'recall_ru', 'build_phrase', 'fill_gap', 'gap_choice', 'translate_ex', 'conj_choice', 'conjugation'],
+  phrase: ['choice_es_ru', 'recall', 'recall_ru', 'build_phrase', 'fill_gap', 'gap_choice', 'translate_ex'],
+  rule: ['rule_intro', 'rule_choice']
 };
-const EASY_FORMATS = ['choice_es_ru', 'recall'];
-const HARD_FORMATS = ['type_translation', 'build_phrase', 'fill_gap', 'conjugation'];
+
+// Лёгкие форматы по типам (первые два показа — только из них)
+const EASY_BY_TYPE = {
+  word: ['choice_es_ru', 'choice_ru_es', 'recall', 'recall_ru', 'gap_choice'],
+  verb: ['choice_es_ru', 'choice_ru_es', 'recall', 'recall_ru', 'gap_choice', 'conj_choice'],
+  phrase: ['choice_es_ru', 'recall', 'recall_ru'],
+  rule: [] // у правил особая ветка: rule_intro, затем rule_choice
+};
 
 const FORMAT_LABELS = {
   choice_es_ru: 'исп → рус (выбор)',
   choice_ru_es: 'рус → исп (выбор)',
   type_translation: 'впиши перевод',
   recall: 'вспомни сам',
+  recall_ru: 'вспомни слово',
   build_phrase: 'собери фразу',
   fill_gap: 'впиши пропущенное',
+  gap_choice: 'пропуск (выбор)',
+  translate_ex: 'переведи пример',
+  conj_choice: 'форма глагола (выбор)',
   conjugation: 'спряжение',
-  rule_theory: 'теория правила',
+  rule_intro: 'правило: теория и вопрос',
   rule_choice: 'вопрос по правилу'
 };
 
@@ -101,6 +121,7 @@ const PROMPT_TEMPLATE = [
   '- "ru" — перевод на русский; если перевода в списке нет — подбери самый частотный сам;',
   '- "tr" — примерное чтение кириллицей по правилам испанского произношения;',
   '- "ex" — короткий пример употребления на испанском: простое предложение уровня A1–A2, ОБЯЗАТЕЛЬНО содержащее "es" целиком (для правила — два коротких примера через точку);',
+  '- "exRu" — перевод примера "ex" на русский, дословный;',
   '- "type" — тип из шага 1;',
   '- "priority" — число от 1 до 10 по частотности: самые частотные — 9-10, средние — 5-7, редкие — 1-4.',
   '',
@@ -111,8 +132,8 @@ const PROMPT_TEMPLATE = [
   '',
   'ШАГ 4. Для записей с type "rule" добавь:',
   '- "ruleText" — формулировка правила простыми словами, 2–4 предложения, с примерами;',
-  '- "ruleQuestions" — массив из 2–3 объектов: { "q": "вопрос по правилу", "options": ["верный вариант", "дистрактор", "дистрактор", "дистрактор"], "correct": 0 }',
-  'В каждом вопросе ровно 4 варианта, ровно один верный (correct — его ИНДЕКС в options, 0–3; верный не обязан быть первым — расставляй варианты вразброс). Дистракторы — правдоподобные типичные ошибки.',
+  '- "ruleQuestions" — массив РОВНО из 3 объектов: { "q": "вопрос по правилу", "options": ["вариант", "вариант", "вариант", "вариант"], "correct": 0 }',
+  'В каждом вопросе ровно 4 варианта, ровно один верный (correct — его ИНДЕКС в options, 0–3; верный не обязан быть первым — расставляй варианты вразброс). Три вопроса должны проверять РАЗНЫЕ стороны правила (употребление, форма, типичная ошибка) — не задавай три раза один и тот же вопрос в разных словах. Вопросы проверяют ПОНИМАНИЕ правила, а не память на формулировку ruleText. Дистракторы — правдоподобные типичные ошибки.',
   'Для записей других типов эти поля НЕ добавляй.',
   '',
   'ШАГ 5. Ответ должен быть ТОЛЬКО JSON-массивом. Первый символ ответа — [, последний — ].',
@@ -121,7 +142,7 @@ const PROMPT_TEMPLATE = [
   'Если список пуст или по нему невозможно составить записи, ответь ровно одной строкой: НЕ ПОНЯЛ СПИСОК',
   '',
   'Образец формата (поля id, status, interval, nextShow, errors, correct НЕ добавляй — приложение проставит их само):',
-  '[{"es":"casa","ru":"дом","tr":"коса","ex":"Mi casa es pequeña.","type":"word","priority":9},{"es":"tener","ru":"иметь","tr":"тэнэр","ex":"Tengo un perro.","type":"verb","priority":10,"forms":{"yo":"tengo","tu":"tienes","el":"tiene","nosotros":"tenemos","vosotros":"tenéis","ellos":"tienen"}},{"es":"Ser vs Estar","ru":"Различие ser и estar","tr":"сэр versus эстар","ex":"Soy estudiante. Estoy en casa.","type":"rule","priority":9,"ruleText":"Ser — для постоянных признаков, estar — для состояний и мест.","ruleQuestions":[{"q":"Как сказать «Я дома»?","options":["Estoy en casa","Soy en casa","Estoy a casa","Soy casa"],"correct":0}]}]',
+  '[{"es":"casa","ru":"дом","tr":"коса","ex":"Mi casa es pequeña.","exRu":"Мой дом маленький.","type":"word","priority":9},{"es":"tener","ru":"иметь","tr":"тэнэр","ex":"Tengo un perro.","exRu":"У меня есть собака.","type":"verb","priority":10,"forms":{"yo":"tengo","tu":"tienes","el":"tiene","nosotros":"tenemos","vosotros":"tenéis","ellos":"tienen"}},{"es":"Ser vs Estar","ru":"Различие ser и estar","tr":"сэр versus эстар","ex":"Soy estudiante. Estoy en casa.","exRu":"Я студент. Я дома.","type":"rule","priority":9,"ruleText":"Ser — для постоянных признаков, estar — для состояний и мест.","ruleQuestions":[{"q":"Как сказать «Я дома»?","options":["Estoy en casa","Soy en casa","Estoy a casa","Soy casa"],"correct":0},{"q":"«Она врач» — как правильно?","options":["Ella es médica","Ella está médica","Ella es en médica","Ella está médica"],"correct":0},{"q":"«Я устал» — какой глагол?","options":["estar","ser","haber","tener"],"correct":0}]}]',
   '',
   'Мой список:'
 ].join('\n');
@@ -221,16 +242,21 @@ function defaultProgress() {
     history: {},
     formats: emptyCounter(FORMAT_KEYS_ALL),
     types: emptyCounter(TYPES),
-    settings: { appsScriptUrl: '', chatId: '', newLimit: NEW_LIMIT_DEFAULT, lastExport: 0, bannerHiddenDay: '', typeFilter: 'all' }
+    settings: {
+      appsScriptUrl: '', chatId: '',
+      sessionSize: SESSION_SIZE_DEFAULT,
+      newLimit: NEW_LIMIT_DEFAULT,
+      lastExport: 0, bannerHiddenDay: '', typeFilter: 'all'
+    }
   };
 }
 
-// Запись в формате v2 из стартового объекта
+// Запись в формате v3 из стартового объекта
 function toAppRecord(src) {
   return {
     id: src.id,
     es: src.es, ru: src.ru,
-    tr: src.tr || '', ex: src.ex || '',
+    tr: src.tr || '', ex: src.ex || '', exRu: src.exRu || '',
     type: TYPES.indexOf(src.type) !== -1 ? src.type : 'word',
     status: 'new',
     interval: 0,          // индекс ступени лестницы
@@ -253,8 +279,20 @@ function createStarterDB() {
   return {
     words: STARTER_SET.map(toAppRecord),
     progress: defaultProgress(),
-    v: 2
+    v: 3
   };
+}
+
+// Карта exRu стартового набора: дозаполняем старым записям без сброса прогресса
+const EXRU_BY_ID = {};
+STARTER_SET.forEach(function (w) { if (w.exRu) EXRU_BY_ID[w.id] = w.exRu; });
+
+function fillMissingExRu(words) {
+  words.forEach(function (w) {
+    if ((!w.exRu || !String(w.exRu).length) && EXRU_BY_ID[w.id]) {
+      w.exRu = EXRU_BY_ID[w.id];
+    }
+  });
 }
 
 function loadDB() {
@@ -264,7 +302,7 @@ function loadDB() {
     try {
       const parsed = JSON.parse(raw);
       const first = parsed && Array.isArray(parsed.words) && parsed.words[0];
-      // Совместимость: старый формат не имеет поля type — сознательный сброс
+      // Совместимость: совсем старый формат без type — сознательный сброс
       if (first && typeof first === 'object' && !('type' in first)) {
         try { localStorage.removeItem(STORAGE_KEY); } catch (e2) {}
         db = createStarterDB();
@@ -276,8 +314,10 @@ function loadDB() {
         db = {
           words: parsed.words.map(sanitizeRecord),
           progress: sanitizeProgress(parsed.progress),
-          v: 2
+          v: 3
         };
+        fillMissingExRu(db.words); // стартовые записи получают перевод примера
+        saveDB();
         return;
       }
     } catch (e) {
@@ -292,6 +332,7 @@ function loadDB() {
 // Гарантия всех полей у записи (защита от бэкапов с пропусками)
 function sanitizeRecord(w) {
   const rec = toAppRecord(w);
+  rec.exRu = typeof w.exRu === 'string' ? w.exRu : '';
   rec.status = ['new', 'learning', 'learned'].indexOf(w.status) !== -1 ? w.status : 'new';
   rec.interval = (typeof w.interval === 'number' && w.interval >= 0 && w.interval < INTERVALS.length) ? w.interval : 0;
   rec.nextShow = typeof w.nextShow === 'string' && w.nextShow ? w.nextShow
@@ -430,6 +471,11 @@ function bumpPriority(word, correct, hinted) {
 }
 
 // ---------- Сборка сессии ----------
+function getSessionSize() {
+  const n = parseInt(db.progress.settings.sessionSize, 10);
+  return SESSION_SIZES.indexOf(n) !== -1 ? n : SESSION_SIZE_DEFAULT;
+}
+
 // Фильтр типа: 'all' или один из TYPES
 function typePool() {
   const f = db.progress.settings.typeFilter || 'all';
@@ -452,15 +498,16 @@ function buildRegularSession() {
     if (b.priority !== a.priority) return b.priority - a.priority;
     return nextShowTime(a) - nextShowTime(b);
   });
-  const chosen = scheduled.slice(0, SESSION_SIZE);
+  const size = getSessionSize();
+  const chosen = scheduled.slice(0, size);
 
-  // Новые: до лимита, в остаток от 10, по убыванию priority
+  // Новые: до лимита, в остаток от размера сессии, по убыванию priority
   const newLimit = db.progress.settings.newLimit || NEW_LIMIT_DEFAULT;
-  const slots = Math.min(newLimit, SESSION_SIZE - chosen.length);
+  const slots = Math.min(newLimit, size - chosen.length);
   if (slots > 0) {
     const fresh = pool.filter(function (w) { return w.status === 'new'; });
     fresh.sort(function (a, b) { return b.priority - a.priority; });
-    for (let i = 0; i < fresh.length && chosen.length < SESSION_SIZE && i < slots; i++) chosen.push(fresh[i]);
+    for (let i = 0; i < fresh.length && chosen.length < size && i < slots; i++) chosen.push(fresh[i]);
   }
   if (!chosen.length) return null;
   return assembleSession(chosen, false);
@@ -469,7 +516,7 @@ function buildRegularSession() {
 // Сессия из готового списка (худшие записи, досрочный повтор)
 function buildListSession(list, premature) {
   if (!list || !list.length) return null;
-  return assembleSession(list.slice(0, 20), premature);
+  return assembleSession(list.slice(0, 50), premature);
 }
 
 // Досрочный повтор: случайные выученные
@@ -482,7 +529,7 @@ function buildPrematureSession() {
 // Назначение форматов и перемешивание
 function assembleSession(records, premature) {
   const items = records.map(function (w) {
-    return { word: w, mode: pickFormatFor(w), forced: '', hardMode: '' };
+    return { word: w, mode: pickFormatFor(w) };
   });
   session = {
     items: shuffle(items),
@@ -492,21 +539,31 @@ function assembleSession(records, premature) {
   return session;
 }
 
+// Сколько раз запись уже показывалась (по числу ответов)
+function showCount(word) {
+  return (word.correct || 0) + (word.errors || 0);
+}
+
 // Формат для записи при сборке сессии:
-// первый показ (new) — всегда лёгкий; для правил — rule_theory; иначе случайный разрешённый
+// правила — intro на первом показе, затем вопросы;
+// первые два показа остальных типов — лёгкий формат; дальше — случайный разрешённый
 function pickFormatFor(word) {
   if (word.type === 'rule') {
-    if (word.status === 'new') return 'rule_theory';
-    return hasValidQuestions(word) ? 'rule_choice' : 'rule_theory';
+    if (word.status === 'new') return 'rule_intro';
+    return hasValidQuestions(word) ? 'rule_choice' : 'rule_intro';
   }
-  if (word.status === 'new') return randomOf(EASY_FORMATS);
+  const easy = EASY_BY_TYPE[word.type] || EASY_BY_TYPE.word;
+  if (word.status === 'new' || showCount(word) < 2) {
+    const avail = easy.filter(function (f) { return formatAvailable(word, f); });
+    return avail.length ? randomOf(avail) : 'recall';
+  }
   return randomOf(allowedFormats(word));
 }
 
 // Разрешённые форматы с учётом наличия данных (смягчение, не поломка)
 function allowedFormats(word) {
   if (word.type === 'rule') {
-    return hasValidQuestions(word) ? ['rule_choice'] : ['rule_theory'];
+    return hasValidQuestions(word) ? ['rule_choice'] : ['rule_intro'];
   }
   let list = (FORMATS_BY_TYPE[word.type] || FORMATS_BY_TYPE.word).filter(function (f) {
     return formatAvailable(word, f);
@@ -523,14 +580,26 @@ function formatAvailable(word, f) {
       return n >= 2 && n <= 8;
     }
     case 'fill_gap':
+    case 'gap_choice':
+      // Пропуск возможен, только если слово целиком встречается в примере
       return !!word.ex && !!word.es &&
         word.ex.toLowerCase().indexOf(word.es.toLowerCase()) !== -1;
+    case 'translate_ex':
+      // Нужен перевод примера и хотя бы 3 других перевода для дистракторов
+      if (!word.ex || !word.exRu) return false;
+      return db.words.filter(function (w) {
+        return w.id !== word.id && w.exRu &&
+          normalizeKey(w.exRu) !== normalizeKey(word.exRu);
+      }).length >= 3;
+    case 'conj_choice':
     case 'conjugation':
       return word.type === 'verb' && !!word.forms &&
         FORM_KEYS.every(function (k) { return word.forms[k]; });
     case 'type_translation':
     case 'choice_es_ru':
     case 'choice_ru_es':
+    case 'recall':
+    case 'recall_ru':
       return !!word.ru && !!word.es;
     default:
       return true;
@@ -582,10 +651,14 @@ function renderCard() {
   if (item.mode === 'choice_es_ru' || item.mode === 'choice_ru_es') renderChoiceCard(area, item);
   else if (item.mode === 'type_translation') renderTypeCard(area, item);
   else if (item.mode === 'recall') renderRecallCard(area, item);
+  else if (item.mode === 'recall_ru') renderRecallRuCard(area, item);
   else if (item.mode === 'build_phrase') renderBuildCard(area, item);
   else if (item.mode === 'fill_gap') renderGapCard(area, item);
+  else if (item.mode === 'gap_choice') renderGapChoiceCard(area, item);
+  else if (item.mode === 'translate_ex') renderTranslateExCard(area, item);
+  else if (item.mode === 'conj_choice') renderConjChoiceCard(area, item);
   else if (item.mode === 'conjugation') renderConjCard(area, item);
-  else if (item.mode === 'rule_theory') renderRuleTheoryCard(area, item);
+  else if (item.mode === 'rule_intro') renderRuleIntroCard(area, item);
   else if (item.mode === 'rule_choice') renderRuleChoiceCard(area, item);
   else renderRecallCard(area, item);
 }
@@ -607,29 +680,31 @@ function renderChoiceCard(area, item) {
   card.innerHTML = html;
   area.appendChild(card);
 
+  appendOptions(area, item, options, correct);
+  const sp = el('speak');
+  if (sp) sp.addEventListener('click', function () { speak(w.es); });
+}
+
+// Общее для карточек выбора: список кнопок-вариантов
+function appendOptions(area, item, options, correct) {
   const opts = document.createElement('div');
   opts.className = 'options';
   options.forEach(function (opt) {
     const b = document.createElement('button');
     b.className = 'option';
     b.textContent = opt;
-    b.addEventListener('click', function () { submitChoice(item, opt); });
+    b.addEventListener('click', function () {
+      const ok = normalizeKey(opt) === normalizeKey(correct);
+      opts.querySelectorAll('.option').forEach(function (x) {
+        x.disabled = true;
+        if (normalizeKey(x.textContent) === normalizeKey(correct)) x.style.borderColor = 'var(--ok)';
+        else if (x.textContent === opt && !ok) x.style.borderColor = 'var(--err)';
+      });
+      finishAnswer(item, ok, { hinted: false });
+    });
     opts.appendChild(b);
   });
   area.appendChild(opts);
-  const sp = el('speak');
-  if (sp) sp.addEventListener('click', function () { speak(w.es); });
-}
-
-function submitChoice(item, chosen) {
-  const correct = item.mode === 'choice_es_ru' ? item.word.ru : item.word.es;
-  const ok = normalizeKey(chosen) === normalizeKey(correct);
-  document.querySelectorAll('.option').forEach(function (b) {
-    b.disabled = true;
-    if (normalizeKey(b.textContent) === normalizeKey(correct)) b.style.borderColor = 'var(--ok)';
-    else if (b.textContent === chosen && !ok) b.style.borderColor = 'var(--err)';
-  });
-  finishAnswer(item, ok, { hinted: false });
 }
 
 // Умные дистракторы: по убыванию похожести
@@ -690,22 +765,113 @@ function renderTypeCard(area, item) {
   renderInputBlock(area, item, w.es, 'Впиши перевод на испанском');
 }
 
+// Маскировка слова в примере: «___» вместо es
+function maskedExample(word) {
+  const re = new RegExp(word.es.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+  return word.ex.replace(re, '___');
+}
+
 // Карточка «впиши пропущенное слово»
 function renderGapCard(area, item) {
   const w = item.word;
-  const re = new RegExp(w.es.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
-  const masked = w.ex.replace(re, '___');
   const card = document.createElement('div');
   card.className = 'word-card pop';
   card.innerHTML =
     '<div class="word-mode">' + FORMAT_LABELS.fill_gap + '</div>' +
-    '<div class="word-front" style="font-size:20px">' + esc(masked) + '</div>' +
+    '<div class="word-front" style="font-size:20px">' + esc(maskedExample(w)) + '</div>' +
     '<div class="word-sub">Пропущено: «' + esc(w.ru) + '»</div>';
   area.appendChild(card);
   renderInputBlock(area, item, w.es, 'Впиши пропущенное слово');
 }
 
-// Карточка спряжения
+// Карточка «выбери слово к пропуску» (лёгкий вариант fill_gap)
+function renderGapChoiceCard(area, item) {
+  const w = item.word;
+  const options = buildOptions(w, 'es');
+  if (options.length < 2) { item.mode = 'fill_gap'; renderGapCard(area, item); return; }
+  const card = document.createElement('div');
+  card.className = 'word-card pop';
+  card.innerHTML =
+    '<div class="word-mode">' + FORMAT_LABELS.gap_choice + '</div>' +
+    '<div class="word-front" style="font-size:20px">' + esc(maskedExample(w)) + '</div>' +
+    '<div class="word-sub">Какое слово пропущено? Перевод: «' + esc(w.ru) + '»</div>';
+  area.appendChild(card);
+  appendOptions(area, item, options, w.es);
+}
+
+// Карточка «переведи пример» (выбор перевода предложения)
+function renderTranslateExCard(area, item) {
+  const w = item.word;
+  const correct = w.exRu;
+  const correctKey = normalizeKey(correct);
+  // Дистракторы: переводы других примеров, желательно близкой длины
+  const pool = db.words.filter(function (x) {
+    return x.id !== w.id && x.exRu && normalizeKey(x.exRu) !== correctKey;
+  });
+  const scored = pool.map(function (x) {
+    return { v: x.exRu, s: Math.random() * 0.9 + (Math.abs(x.exRu.length - correct.length) <= 15 ? 1 : 0) };
+  });
+  scored.sort(function (a, b) { return b.s - a.s; });
+  const out = [];
+  const seen = {};
+  seen[correctKey] = true;
+  for (let i = 0; i < scored.length && out.length < 3; i++) {
+    const k = normalizeKey(scored[i].v);
+    if (seen[k]) continue;
+    seen[k] = true;
+    out.push(scored[i].v);
+  }
+  if (out.length < 3) { item.mode = 'recall'; renderRecallCard(area, item); return; }
+  const options = shuffle([correct].concat(out));
+
+  const card = document.createElement('div');
+  card.className = 'word-card pop';
+  card.innerHTML =
+    '<div class="word-mode">' + FORMAT_LABELS.translate_ex + '</div>' +
+    '<div class="word-front" style="font-size:22px">' + esc(w.ex) + '</div>' +
+    '<div class="word-sub">Выбери верный перевод</div>';
+  area.appendChild(card);
+  appendOptions(area, item, options, correct);
+}
+
+// Карточка спряжения «выбери форму» (лёгкий)
+function renderConjChoiceCard(area, item) {
+  const w = item.word;
+  const person = randomOf(FORM_KEYS);
+  item.person = person; // фиксируем форму на показ карточки
+  const correct = w.forms[person];
+  // Дистракторы: формы других лиц этого глагола + формы того же лица других глаголов
+  const pool = [];
+  FORM_KEYS.forEach(function (k) {
+    if (k !== person && w.forms[k]) pool.push(w.forms[k]);
+  });
+  db.words.forEach(function (x) {
+    if (x.id !== w.id && x.type === 'verb' && x.forms && x.forms[person]) pool.push(x.forms[person]);
+  });
+  const out = [];
+  const seen = {};
+  seen[normalizeKey(correct)] = true;
+  const shuffled = shuffle(pool);
+  for (let i = 0; i < shuffled.length && out.length < 3; i++) {
+    const k = normalizeKey(shuffled[i]);
+    if (seen[k]) continue;
+    seen[k] = true;
+    out.push(shuffled[i]);
+  }
+  if (out.length < 3) { item.mode = 'conjugation'; renderConjCard(area, item); return; }
+  const options = shuffle([correct].concat(out));
+
+  const card = document.createElement('div');
+  card.className = 'word-card pop';
+  card.innerHTML =
+    '<div class="word-mode">' + FORMAT_LABELS.conj_choice + '</div>' +
+    '<div class="word-front">' + esc(w.es) + '</div>' +
+    '<div class="word-sub">местоимение: <b>' + esc(PRONOUN_LABELS[person]) + '</b> — выбери форму presente</div>';
+  area.appendChild(card);
+  appendOptions(area, item, options, correct);
+}
+
+// Карточка спряжения «впиши форму» (сложный)
 function renderConjCard(area, item) {
   const w = item.word;
   const person = randomOf(FORM_KEYS);
@@ -720,7 +886,7 @@ function renderConjCard(area, item) {
   renderInputBlock(area, item, w.forms[person], 'Впиши форму presente');
 }
 
-// Общий блок ручного ввода: поле, «Ответить», «Открыть букву»
+// Общий блок ручного ввода: поле, «Открыть букву», «Не знаю», «Ответить»
 function renderInputBlock(area, item, answer, placeholder) {
   const form = document.createElement('div');
   form.id = 'input-form';
@@ -748,7 +914,18 @@ function renderInputBlock(area, item, answer, placeholder) {
       hapticLight();
     }
   });
-  form.appendChild(hintBtn);
+
+  const dontBtn = document.createElement('button');
+  dontBtn.className = 'btn-dontknow';
+  dontBtn.textContent = 'Не знаю';
+  // Сдача: правильный ответ покажет фидбек, засчитывается ошибка
+  dontBtn.addEventListener('click', function () { finishAnswer(item, false, { hinted: false }); });
+
+  const row = document.createElement('div');
+  row.className = 'input-row';
+  row.appendChild(hintBtn);
+  row.appendChild(dontBtn);
+  form.appendChild(row);
 
   const btn = document.createElement('button');
   btn.className = 'btn-primary';
@@ -766,7 +943,7 @@ function renderInputBlock(area, item, answer, placeholder) {
 
 function submitInput(item) {
   const val = el('input-answer').value;
-  if (!val.trim()) { toast('Сначала впиши ответ'); return; }
+  if (!val.trim()) { toast('Сначала впиши ответ — или нажми «Не знаю»'); return; }
   const answer = item.mode === 'conjugation' ? item.word.forms[item.person] : item.word.es;
   const ok = answersMatch(val, answer);
   finishAnswer(item, ok, { hinted: !!item.hinted && ok });
@@ -780,7 +957,7 @@ function answersMatch(input, es) {
   return variants.indexOf(a) !== -1;
 }
 
-// Карточка «показал → вспомнил / не вспомнил»
+// Карточка «показал → вспомнил / не вспомнил» (исп → рус)
 function renderRecallCard(area, item) {
   const w = item.word;
   const card = document.createElement('div');
@@ -793,7 +970,26 @@ function renderRecallCard(area, item) {
     '<div><button class="speak-btn" aria-label="Озвучить">' + SPEAK_ICON + '</button></div>';
   area.appendChild(card);
   card.querySelector('.speak-btn').addEventListener('click', function () { speak(w.es); });
+  bindSelfButtons(area, item, w.ru);
+}
 
+// Карточка «вспомни слово» (рус → исп, без печати)
+function renderRecallRuCard(area, item) {
+  const w = item.word;
+  const card = document.createElement('div');
+  card.className = 'word-card pop';
+  card.innerHTML =
+    '<div class="word-mode">' + FORMAT_LABELS.recall_ru + '</div>' +
+    '<div class="word-front">' + esc(w.ru) + '</div>' +
+    '<div class="word-sub">Вспомни по-испански — вслух или про себя</div>' +
+    '<div id="self-answer" class="hidden"><div class="fb-answer" style="margin-top:14px">' + esc(w.es) + '</div>' +
+    (w.tr ? '<div class="word-tr">' + esc(w.tr) + '</div>' : '') + '</div>';
+  area.appendChild(card);
+  bindSelfButtons(area, item, w.es);
+}
+
+// Общие кнопки «Показать перевод» → «Вспомнил / Не вспомнил»
+function bindSelfButtons(area, item, answer) {
   const btns = document.createElement('div');
   btns.className = 'options';
   const show = document.createElement('button');
@@ -827,7 +1023,7 @@ function renderBuildCard(area, item) {
   card.className = 'word-card pop';
   card.innerHTML =
     '<div class="word-mode">' + FORMAT_LABELS.build_phrase + '</div>' +
-    '<div class="word-sub" style="margin-top:0">Перевод: «' + esc(w.ru) + '»</div>' +
+    '<div class="word-sub" style="margin-top:0">Перевод: «' + esc(w.exRu || w.ru) + '»</div>' +
     '<div class="build-slots" id="build-slots"><span class="slot-empty">Нажимай слова в правильном порядке</span></div>' +
     '<div class="build-tokens" id="build-tokens"></div>' +
     '<button class="btn-ghost" id="build-reset" style="margin-top:10px">Сбросить</button>';
@@ -880,29 +1076,46 @@ function renderBuildCard(area, item) {
   });
 }
 
-// Карточка теории правила (первый показ)
-function renderRuleTheoryCard(area, item) {
+// Карточка правила: теория и СРАЗУ вопрос на той же карточке (первый показ).
+// Лестницу двигает только ответ на вопрос. Если вопросов нет (битый импорт) —
+// запасной вариант с кнопкой «Понятно», иначе правило нетренируемо.
+function renderRuleIntroCard(area, item) {
   const w = item.word;
+  const qs = sanitizeQuestions(w.ruleQuestions);
   const card = document.createElement('div');
   card.className = 'word-card pop';
-  card.innerHTML =
-    '<div class="word-mode">' + FORMAT_LABELS.rule_theory + '</div>' +
+  let html = '<div class="word-mode">' + FORMAT_LABELS.rule_intro + '</div>' +
     '<div class="word-front" style="font-size:22px">' + esc(w.es) + '</div>' +
     '<div class="rule-text">' + esc(w.ruleText || 'Правило без описания.') + '</div>' +
     (w.ex ? '<div class="fb-ex" style="margin-top:10px">' + esc(w.ex) + '</div>' : '') +
-    '<button class="btn-primary" id="rule-ok" style="margin-top:16px">Понятно</button>';
+    (w.exRu ? '<div class="fb-tr" style="margin-top:4px">' + esc(w.exRu) + '</div>' : '');
+
+  if (qs.length) {
+    const q = randomOf(qs);
+    item.ruleQ = q; // запоминаем вопрос для фидбека
+    html += '<div class="rule-question">' + esc(q.q) + '</div>';
+    card.innerHTML = html;
+    area.appendChild(card);
+    appendOptions(area, item, q.options, q.options[q.correct]);
+    return;
+  }
+
+  // Запасной вариант: правило без валидных вопросов
+  html += '<button class="btn-primary" id="rule-ok" style="margin-top:16px">Понятно</button>';
+  card.innerHTML = html;
   area.appendChild(card);
   el('rule-ok').addEventListener('click', function () {
     finishAnswer(item, true, { hinted: false });
   });
 }
 
-// Карточка вопроса по правилу
+// Карточка вопроса по правилу (со второго показа)
 function renderRuleChoiceCard(area, item) {
   const w = item.word;
   const qs = sanitizeQuestions(w.ruleQuestions);
-  if (!qs.length) { item.mode = 'rule_theory'; renderRuleTheoryCard(area, item); return; }
+  if (!qs.length) { item.mode = 'rule_intro'; renderRuleIntroCard(area, item); return; }
   const q = randomOf(qs);
+  item.ruleQ = q;
 
   const card = document.createElement('div');
   card.className = 'word-card pop';
@@ -911,21 +1124,7 @@ function renderRuleChoiceCard(area, item) {
     '<div class="word-front" style="font-size:20px">' + esc(q.q) + '</div>' +
     '<div class="rule-text">' + esc(w.ruleText || '') + '</div>';
   area.appendChild(card);
-
-  const opts = document.createElement('div');
-  opts.className = 'options';
-  q.options.forEach(function (opt, i) {
-    const b = document.createElement('button');
-    b.className = 'option';
-    b.textContent = opt;
-    b.addEventListener('click', function () {
-      const ok = i === q.correct;
-      document.querySelectorAll('.option').forEach(function (x) { x.disabled = true; });
-      finishAnswer(item, ok, { hinted: false, ruleQ: q });
-    });
-    opts.appendChild(b);
-  });
-  area.appendChild(opts);
+  appendOptions(area, item, q.options, q.options[q.correct]);
 }
 
 // ---------- Общая точка: применяем результат и показываем фидбек ----------
@@ -938,7 +1137,9 @@ function finishAnswer(item, ok, extra) {
   showFeedback(item, ok, extra);
 }
 
-// Обновление записи и статистики после ответа
+// Обновление записи и статистики после ответа.
+// Ошибка НЕ вставляет запись в текущую сессию: сброс лестницы,
+// следующий показ — в следующей тренировке (nextShow = сейчас).
 function applyAnswer(word, format, correct, extra) {
   const p = db.progress;
   const today = todayStr();
@@ -973,16 +1174,15 @@ function applyAnswer(word, format, correct, extra) {
   bumpPriority(word, correct, hinted);
 
   if (session.premature) {
-    // Досрочный повтор выученных: верный ответ ничего не меняет,
+    // Досрочный повтор выученных: верный ответ переносит на обслуживание,
     // ошибка возвращает запись на лестницу
     if (correct) {
-      scheduleReturn(word, format, true);
-      return;
+      word.nextShow = isoNow(MAINTENANCE_DAYS);
+    } else {
+      word.status = 'learning';
+      word.interval = 0;
+      word.nextShow = isoNow(0);
     }
-    word.status = 'learning';
-    word.interval = 0;
-    word.nextShow = isoNow(0);
-    scheduleReturn(word, format, false);
     saveDB();
     return;
   }
@@ -991,14 +1191,12 @@ function applyAnswer(word, format, correct, extra) {
     if (hinted) {
       // Подсказанный ответ: лестница не двигается, следующий показ — завтра
       word.nextShow = isoNow(1);
-      scheduleReturn(word, format, true);
       saveDB();
       return;
     }
     if (word.status === 'learned') {
       // Обслуживание: верно — следующий показ через 75 дней
       word.nextShow = isoNow(MAINTENANCE_DAYS);
-      scheduleReturn(word, format, true);
       saveDB();
       return;
     }
@@ -1016,50 +1214,15 @@ function applyAnswer(word, format, correct, extra) {
       word.status = 'learning';
       word.nextShow = isoNow(INTERVALS[word.interval]);
     }
-    scheduleReturn(word, format, true);
     saveDB();
     return;
   }
 
-  // Ошибка: сброс на старт лестницы + возврат в сессию (fading)
+  // Ошибка: сброс на старт лестницы; придёт в следующей тренировке
   word.interval = 0;
   word.status = 'learning';
   word.nextShow = isoNow(0);
-  scheduleReturn(word, format, false);
   saveDB();
-}
-
-// Вставка возврата в сессию через одну карточку.
-// fading: верно в лёгком-возврате после ошибки в сложном — снова сложный формат;
-// ошибка — возврат в лёгком; верно без fade-истории — запись уходит.
-function scheduleReturn(word, format, wasCorrect) {
-  const item = session.items[session.idx];
-  if (!item || item.word.id !== word.id) return; // защита от рассинхрона
-
-  if (!wasCorrect) {
-    // Ошибка (в любом формате) → возврат в лёгком формате.
-    // Если ошибка была в сложном — запоминаем его для fade-возврата.
-    const hard = HARD_FORMATS.indexOf(format) !== -1 ? format : (item.hardMode || '');
-    session.items.splice(session.idx + 1, 0, {
-      word: word,
-      mode: randomOf(EASY_FORMATS),
-      forced: 'easy',
-      hardMode: hard
-    });
-    return;
-  }
-
-  // Верный ответ
-  if (item.forced === 'easy' && item.hardMode) {
-    // Возврат после ошибки в сложном: верно в лёгком → снова сложный формат
-    session.items.splice(session.idx + 1, 0, {
-      word: word,
-      mode: item.hardMode,
-      forced: 'hard',
-      hardMode: ''
-    });
-  }
-  // В остальных случаях верный ответ уводит запись (nextShow в будущем) — без вставки
 }
 
 // ---------- Фидбек ----------
@@ -1076,7 +1239,7 @@ function showFeedback(item, ok, extra) {
   let html = '<div class="fb-title">' + (ok ? 'Верно!' : 'Неверно') + '</div>';
   if (extra.hinted) html += '<div class="fb-hinted">ответ с подсказкой — ступень не изменилась, повтор завтра</div>';
 
-  if (item.mode === 'conjugation') {
+  if (item.mode === 'conjugation' || item.mode === 'conj_choice') {
     html += '<div class="fb-answer">' + esc(PRONOUN_LABELS[item.person]) + ': ' + esc(w.forms[item.person]) + '</div>';
     if (!ok) {
       // Таблица всех шести форм при ошибке
@@ -1086,10 +1249,8 @@ function showFeedback(item, ok, extra) {
       });
       html += '</div>';
     }
-  } else if (item.mode === 'rule_theory') {
-    html += '<div class="fb-answer">' + esc(w.es) + '</div>';
-  } else if (item.mode === 'rule_choice') {
-    const q = extra.ruleQ;
+  } else if (item.mode === 'rule_intro' || item.mode === 'rule_choice') {
+    const q = item.ruleQ;
     if (q) html += '<div class="fb-answer">' + esc(q.options[q.correct]) + '</div>';
     if (w.ruleText) html += '<div class="rule-text">' + esc(w.ruleText) + '</div>';
   } else if (item.mode === 'build_phrase') {
@@ -1097,12 +1258,21 @@ function showFeedback(item, ok, extra) {
     if (!ok && extra.builtOrder) {
       html += '<div class="fb-order">Правильный порядок: ' + esc(extra.builtOrder.join(' ')) + '</div>';
     }
-    html += '<div class="fb-tr">' + esc(w.ru) + '</div>';
+    html += '<div class="fb-tr">' + esc(w.exRu || w.ru) + '</div>';
+  } else if (item.mode === 'translate_ex') {
+    html += '<div class="fb-answer">' + esc(w.exRu) + '</div>';
+    html += '<div class="fb-ex">' + esc(w.ex) + '</div>';
+  } else if (item.mode === 'recall_ru') {
+    html += '<div class="fb-answer">' + esc(w.es) + '</div>';
+    if (w.tr) html += '<div class="fb-tr">' + esc(w.tr) + '</div>';
+    if (w.ex) html += '<div class="fb-ex">' + esc(w.ex) + '</div>';
   } else {
     html += '<div class="fb-answer">' + esc(w.es) + ' — ' + esc(w.ru) + '</div>';
     if (w.tr) html += '<div class="fb-tr">' + esc(w.tr) + '</div>';
   }
-  if (w.ex && item.mode !== 'build_phrase') html += '<div class="fb-ex">' + esc(w.ex) + '</div>';
+  if (w.ex && ['build_phrase', 'translate_ex', 'rule_intro', 'rule_choice', 'recall_ru'].indexOf(item.mode) === -1) {
+    html += '<div class="fb-ex">' + esc(w.ex) + '</div>';
+  }
   html += '<button class="btn-primary" id="btn-next">Дальше</button>';
   fb.innerHTML = html;
 
@@ -1304,7 +1474,7 @@ function renderTypeCards() {
   box.innerHTML = html;
 }
 
-// Точность по всем 9 форматам за период
+// Точность по всем форматам за период
 function renderFormatsAccuracy() {
   const box = el('formats-accuracy');
   let html = '';
@@ -1405,7 +1575,7 @@ function addWord() {
   }
   const rec = toAppRecord({
     id: uid(), es: es, ru: ru,
-    tr: el('add-tr').value.trim(), ex: el('add-ex').value.trim(),
+    tr: el('add-tr').value.trim(), ex: el('add-ex').value.trim(), exRu: '',
     type: addType, priority: 5
   });
   db.words.push(rec);
@@ -1459,6 +1629,7 @@ function importWords(text) {
       id: uid(), es: es, ru: ru,
       tr: typeof item.tr === 'string' ? item.tr.trim() : '',
       ex: typeof item.ex === 'string' ? item.ex.trim() : '',
+      exRu: typeof item.exRu === 'string' ? item.exRu.trim() : '',
       type: type,
       priority: item.priority
     });
@@ -1527,7 +1698,7 @@ function exportAll() {
   }
 }
 
-// Восстановление из файла бэкапа (формат v2)
+// Восстановление из файла бэкапа (формат v3)
 function restoreBackup() {
   const input = el('import-backup-file');
   const msg = el('restore-msg');
@@ -1552,8 +1723,9 @@ function restoreBackup() {
         db = {
           words: data.words.map(sanitizeRecord),
           progress: sanitizeProgress(data.progress),
-          v: 2
+          v: 3
         };
+        fillMissingExRu(db.words);
         saveDB();
         renderHome();
         msg.classList.add('ok');
@@ -1577,6 +1749,9 @@ function restoreBackup() {
 function renderSettings() {
   el('set-url').value = db.progress.settings.appsScriptUrl || '';
   el('set-chat').value = db.progress.settings.chatId || '';
+  document.querySelectorAll('#size-chips button').forEach(function (b) {
+    b.classList.toggle('active', String(getSessionSize()) === b.dataset.size);
+  });
   document.querySelectorAll('#newlimit-chips button').forEach(function (b) {
     b.classList.toggle('active', String(db.progress.settings.newLimit) === b.dataset.limit);
   });
@@ -1707,6 +1882,18 @@ function bindAll() {
         phrase: 'Выражение: устойчивый оборот из 2+ слов (tener hambre).'
       };
       el('add-type-hint').textContent = hints[addType];
+    });
+  });
+
+  // Размер сессии
+  document.querySelectorAll('#size-chips button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      db.progress.settings.sessionSize = parseInt(b.dataset.size, 10) || SESSION_SIZE_DEFAULT;
+      saveDB();
+      document.querySelectorAll('#size-chips button').forEach(function (x) {
+        x.classList.toggle('active', x === b);
+      });
+      toast('Карточек за тренировку: ' + db.progress.settings.sessionSize);
     });
   });
 
