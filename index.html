@@ -62,12 +62,17 @@
       </div>
       <div class="card">
         <h3>Активность по дням</h3>
-        <canvas id="chart-activity" height="220"></canvas>
+        <!-- Фиксированный контейнер: без него Chart.js растягивает график бесконечно -->
+        <div class="chart-box" id="chart-activity-box">
+          <canvas id="chart-activity"></canvas>
+        </div>
         <div id="activity-empty" class="empty hidden">Пока нет данных за этот период</div>
       </div>
       <div class="card">
         <h3>Прогресс базы</h3>
-        <canvas id="chart-status" height="220"></canvas>
+        <div class="chart-box" id="chart-status-box">
+          <canvas id="chart-status"></canvas>
+        </div>
       </div>
       <div class="card">
         <h3>По типам записей</h3>
