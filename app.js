@@ -425,8 +425,12 @@ function renderHome() {
 
   const filter = db.progress.settings.typeFilter || 'all';
   const pool = filter === 'all' ? db.words : db.words.filter(function (w) { return w.type === filter; });
-  el('home-session-hint').textContent = countDueIn(pool)
-    ? 'Готово к показу: ' + countDueIn(pool) + ' записей'
+  const sessionSize = getSessionSize();
+  const pendingSize = pickSessionRecords(pool, sessionSize).length;
+  el('home-session-hint').textContent = pendingSize
+    ? (pendingSize < sessionSize
+        ? 'Сессия: ' + pendingSize + ' карточек (записей пока меньше размера)'
+        : 'Сессия: ' + pendingSize + ' карточек')
     : 'Расписание пусто — добавь новые записи';
   el('home-empty').style.display = db.words.length ? 'none' : 'block';
 
@@ -483,32 +487,71 @@ function typePool() {
   return db.words.filter(function (w) { return w.type === f; });
 }
 
-// Основная сборка: просроченные (learning + обслуживание learned) + новые по приоритету
-function buildRegularSession() {
-  const pool = typePool();
-  const due = pool.filter(function (w) {
-    return w.status === 'learning' && isDue(w);
+// Выбор записей в сессию заданного размера. Порядок заполнения:
+//   1) по расписанию: learning с наступившим сроком + обслуживание learned;
+//   2) новые — до лимита новых за сессию;
+//   3) досрочный долив: learning, чей показ ещё впереди (кто ближе к сроку — тот первым);
+//   4) досрочный долив: learned до срока обслуживания.
+// Долив нужен, чтобы сессия набиралась до выбранного размера, даже когда
+// расписание почти пусто: досрочная карточка при верном ответе уходит на
+// обычный интервал, отсчитанный от сегодня, при ошибке сбрасывается как всегда.
+function pickSessionRecords(pool, size) {
+  const chosen = [];
+  const used = {};
+
+  function take(list, limit) {
+    let taken = 0;
+    for (let i = 0; i < list.length && chosen.length < size; i++) {
+      if (limit !== undefined && taken >= limit) break;
+      if (used[list[i].id]) continue;
+      used[list[i].id] = true;
+      chosen.push(list[i]);
+      taken++;
+    }
+  }
+
+  // 1. По расписанию
+  const scheduled = pool.filter(function (w) {
+    return (w.status === 'learning' || w.status === 'learned') && isDue(w);
   });
-  const maintenance = pool.filter(function (w) {
-    return w.status === 'learned' && isDue(w);
-  });
-  const scheduled = due.concat(maintenance);
   // Приоритет: выше — первее; при равенстве — у кого раньше nextShow
   scheduled.sort(function (a, b) {
     if (b.priority !== a.priority) return b.priority - a.priority;
     return nextShowTime(a) - nextShowTime(b);
   });
-  const size = getSessionSize();
-  const chosen = scheduled.slice(0, size);
+  take(scheduled);
 
-  // Новые: до лимита, в остаток от размера сессии, по убыванию priority
+  // 2. Новые — до лимита
   const newLimit = db.progress.settings.newLimit || NEW_LIMIT_DEFAULT;
-  const slots = Math.min(newLimit, size - chosen.length);
-  if (slots > 0) {
-    const fresh = pool.filter(function (w) { return w.status === 'new'; });
-    fresh.sort(function (a, b) { return b.priority - a.priority; });
-    for (let i = 0; i < fresh.length && chosen.length < size && i < slots; i++) chosen.push(fresh[i]);
+  const fresh = pool.filter(function (w) { return w.status === 'new'; });
+  fresh.sort(function (a, b) { return b.priority - a.priority; });
+  take(fresh, Math.min(newLimit, size - chosen.length));
+
+  // 3. Досрочный долив: learning с ненаступившим сроком, ближайшие к показу
+  if (chosen.length < size) {
+    const early = pool.filter(function (w) {
+      return w.status === 'learning' && !isDue(w);
+    });
+    early.sort(function (a, b) { return nextShowTime(a) - nextShowTime(b); });
+    take(early);
   }
+
+  // 4. Досрочный долив: learned до срока обслуживания, ближайшие к сроку
+  if (chosen.length < size) {
+    const earlyLearned = pool.filter(function (w) {
+      return w.status === 'learned' && !isDue(w);
+    });
+    earlyLearned.sort(function (a, b) { return nextShowTime(a) - nextShowTime(b); });
+    take(earlyLearned);
+  }
+
+  return chosen;
+}
+
+// Основная сборка: расписание + новые + досрочный долив до размера сессии
+function buildRegularSession() {
+  const pool = typePool();
+  const chosen = pickSessionRecords(pool, getSessionSize());
   if (!chosen.length) return null;
   return assembleSession(chosen, false);
 }
@@ -1960,3 +2003,4 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
