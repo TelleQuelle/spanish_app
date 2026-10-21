@@ -1,10 +1,12 @@
 'use strict';
 /* ============================================================
-   ОСНОВНАЯ ЛОГИКА «Испанский каждый день» — версия 2
-   Типы записей (word/verb/phrase/rule), 9 форматов карточек,
-   приоритет (priority), обслуживание выученных (75 дней),
-   подсказки по буквам, умные дистракторы.
-   Хранилище — localStorage. Библиотеки — Telegram WebApp, Chart.js.
+   ОСНОВНАЯ ЛОГИКА «Испанский каждый день» — версия 2.1
+   Правки против 2.0:
+   - графики рисуются в контейнерах с фиксированной высотой
+     (chart-box) — исправлен бесконечный рост страницы;
+   - в Telegram добавляется отступ сверху (класс in-telegram),
+     чтобы контент не уходил под системную шапку;
+   - убран мёртвый вспомогательный код.
    ============================================================ */
 
 // ---------- Telegram WebApp: безопасная обёртка ----------
@@ -55,7 +57,7 @@ const NEW_LIMIT_DEFAULT = 5;
 const TYPES = ['word', 'verb', 'phrase', 'rule'];
 const TYPE_LABELS = { word: 'Слова', verb: 'Глаголы', phrase: 'Выражения', rule: 'Правила' };
 
-// Разрешённые форматы по типам (раздел 2 ТЗ)
+// Разрешённые форматы по типам записей
 const FORMATS_BY_TYPE = {
   word: ['choice_es_ru', 'choice_ru_es', 'type_translation', 'recall', 'build_phrase', 'fill_gap'],
   verb: ['choice_es_ru', 'choice_ru_es', 'type_translation', 'recall', 'build_phrase', 'fill_gap', 'conjugation'],
@@ -203,6 +205,14 @@ function toast(msg) {
 }
 
 // ---------- Хранилище ----------
+const FORMAT_KEYS_ALL = Object.keys(FORMAT_LABELS);
+
+function emptyCounter(keys) {
+  const o = {};
+  keys.forEach(function (k) { o[k] = { t: 0, c: 0 }; });
+  return o;
+}
+
 function defaultProgress() {
   return {
     streak: 0,
@@ -213,12 +223,6 @@ function defaultProgress() {
     types: emptyCounter(TYPES),
     settings: { appsScriptUrl: '', chatId: '', newLimit: NEW_LIMIT_DEFAULT, lastExport: 0, bannerHiddenDay: '', typeFilter: 'all' }
   };
-}
-const FORMAT_KEYS_ALL = Object.keys(FORMAT_LABELS);
-function emptyCounter(keys) {
-  const o = {};
-  keys.forEach(function (k) { o[k] = { t: 0, c: 0 }; });
-  return o;
 }
 
 // Запись в формате v2 из стартового объекта
@@ -436,7 +440,6 @@ function typePool() {
 // Основная сборка: просроченные (learning + обслуживание learned) + новые по приоритету
 function buildRegularSession() {
   const pool = typePool();
-  const now = Date.now();
   const due = pool.filter(function (w) {
     return w.status === 'learning' && isDue(w);
   });
@@ -629,11 +632,11 @@ function submitChoice(item, chosen) {
   finishAnswer(item, ok, { hinted: false });
 }
 
-// Умные дистракторы (раздел 9): по убыванию похожести
+// Умные дистракторы: по убыванию похожести
 function buildOptions(word, field) {
   const correct = word[field];
   const correctKey = normalizeKey(correct);
-  // Пул: сначала того же типа; если мало — все записи (смягчение критерия 3)
+  // Пул: сначала того же типа; если мало — все записи (смягчение критерия)
   let pool = db.words.filter(function (w) {
     return w.id !== word.id && w[field] &&
       w.type === word.type && normalizeKey(w[field]) !== correctKey;
@@ -973,7 +976,7 @@ function applyAnswer(word, format, correct, extra) {
     // Досрочный повтор выученных: верный ответ ничего не меняет,
     // ошибка возвращает запись на лестницу
     if (correct) {
-      scheduleReturn(word, format, item_fading_ok(extra));
+      scheduleReturn(word, format, true);
       return;
     }
     word.status = 'learning';
@@ -1030,13 +1033,12 @@ function applyAnswer(word, format, correct, extra) {
 // fading: верно в лёгком-возврате после ошибки в сложном — снова сложный формат;
 // ошибка — возврат в лёгком; верно без fade-истории — запись уходит.
 function scheduleReturn(word, format, wasCorrect) {
-  // Текущий элемент сессии ищем по позиции (idx указывает на него)
   const item = session.items[session.idx];
   if (!item || item.word.id !== word.id) return; // защита от рассинхрона
 
   if (!wasCorrect) {
-    // Ошибка (в любом формате) → возврат в лёгком формате
-    // Если ошибка была в сложном — запоминаем его для fade-возврата
+    // Ошибка (в любом формате) → возврат в лёгком формате.
+    // Если ошибка была в сложном — запоминаем его для fade-возврата.
     const hard = HARD_FORMATS.indexOf(format) !== -1 ? format : (item.hardMode || '');
     session.items.splice(session.idx + 1, 0, {
       word: word,
@@ -1059,8 +1061,6 @@ function scheduleReturn(word, format, wasCorrect) {
   }
   // В остальных случаях верный ответ уводит запись (nextShow в будущем) — без вставки
 }
-// Заглушка-пояснение: параметр не используется вне scheduleReturn
-function item_fading_ok() { return true; }
 
 // ---------- Фидбек ----------
 function showFeedback(item, ok, extra) {
@@ -1196,9 +1196,13 @@ function periodCounter(kind, key) {
   return { t: t, c: c };
 }
 
-// График активности по дням
+// График активности по дням.
+// Рисуется в chart-box с фиксированной высотой — без этого Chart.js
+// растягивает canvas под высоту карточки, а карточка под canvas:
+// страница уходит вниз бесконечно. Контейнер разрывает эту петлю.
 function renderActivityChart() {
   const canvas = el('chart-activity');
+  const box = el('chart-activity-box');
   const empty = el('activity-empty');
   let labels = [], values = [];
   const days = periodDays();
@@ -1207,7 +1211,7 @@ function renderActivityChart() {
     for (let i = days - 1; i >= 0; i--) {
       const key = todayStr(Date.now() - i * DAY_MS);
       const h = db.progress.history[key];
-      labels.push(key.slice(5));
+      labels.push(key.slice(5)); // «10-20» вместо полной даты
       values.push(h ? h.a : 0);
     }
   } else {
@@ -1221,12 +1225,11 @@ function renderActivityChart() {
   if (charts.activity) { charts.activity.destroy(); charts.activity = null; }
   if (!total) {
     empty.classList.remove('hidden');
-    canvas.style.display = 'none';
+    box.classList.add('hidden');
     return;
   }
   empty.classList.add('hidden');
-  canvas.style.display = 'block';
-  canvas.style.height = '220px';
+  box.classList.remove('hidden');
 
   charts.activity = new Chart(canvas, {
     type: 'bar',
@@ -1246,15 +1249,19 @@ function renderActivityChart() {
   });
 }
 
-// Кольцевая диаграмма статусов
+// Кольцевая диаграмма статусов — тоже в фиксированном контейнере
 function renderStatusChart() {
   const canvas = el('chart-status');
+  const box = el('chart-status-box');
   if (charts.status) { charts.status.destroy(); charts.status = null; }
   const learned = db.words.filter(function (w) { return w.status === 'learned'; }).length;
   const learning = db.words.filter(function (w) { return w.status === 'learning'; }).length;
   const fresh = db.words.filter(function (w) { return w.status === 'new'; }).length;
-  if (!learned && !learning && !fresh) return;
-  canvas.style.height = '220px';
+  if (!learned && !learning && !fresh) {
+    box.classList.add('hidden');
+    return;
+  }
+  box.classList.remove('hidden');
 
   charts.status = new Chart(canvas, {
     type: 'doughnut',
@@ -1638,6 +1645,8 @@ function speak(text) {
 }
 
 // ---------- Тема Telegram ----------
+// Тёмная тема — наша по умолчанию. Светлую системную тему Telegram
+// подставляем через CSS-переменные.
 function applyTheme() {
   if (!tg || !tg.themeParams) return;
   try {
@@ -1730,6 +1739,10 @@ function bindAll() {
 // ---------- Старт ----------
 function init() {
   tgInit();
+  // В Telegram контент уходит под системную шапку — добавляем отступ сверху
+  if (tg) {
+    try { document.body.classList.add('in-telegram'); } catch (e) {}
+  }
   applyTheme();
   if (tg) { try { tg.onEvent('themeChanged', applyTheme); } catch (e) {} }
   loadDB();
