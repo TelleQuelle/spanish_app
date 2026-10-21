@@ -21,14 +21,21 @@
         </div>
       </div>
       <div class="hero">
-        <h1>Испанский<br>каждый день</h1>
-        <p class="subtitle">Твой личный тренажёр слов</p>
+        <h1>Испанский<br><span class="grad">каждый день</span></h1>
+        <p class="subtitle">Тренажёр слов, глаголов, выражений и правил</p>
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-value" id="home-learned">0</div><div class="stat-label">выучено</div></div>
         <div class="stat-card"><div class="stat-value" id="home-queue">0</div><div class="stat-label">в очереди</div></div>
         <div class="stat-card"><div class="stat-value" id="home-streak">0</div><div class="stat-label">стрик, дней</div></div>
         <div class="stat-card"><div class="stat-value" id="home-accuracy">–</div><div class="stat-label">точность за неделю</div></div>
+      </div>
+      <div class="chip-row" id="type-chips">
+        <button class="chip active" data-type="all">Все</button>
+        <button class="chip" data-type="word">Слова</button>
+        <button class="chip" data-type="verb">Глаголы</button>
+        <button class="chip" data-type="phrase">Выражения</button>
+        <button class="chip" data-type="rule">Правила</button>
       </div>
       <button id="btn-start-train" class="btn-primary big">Начать тренировку</button>
       <p class="hint center" id="home-session-hint"></p>
@@ -41,6 +48,7 @@
         <button id="btn-exit-train" class="btn-ghost">Выход</button>
         <div id="train-progress" class="train-progress"></div>
       </div>
+      <div class="train-bar"><div id="train-bar-fill" class="train-bar-fill"></div></div>
       <div id="train-area"></div>
     </section>
 
@@ -62,12 +70,16 @@
         <canvas id="chart-status" height="220"></canvas>
       </div>
       <div class="card">
-        <h3>Точность по режимам</h3>
-        <p class="hint">За выбранный период</p>
-        <div id="modes-accuracy"></div>
+        <h3>По типам записей</h3>
+        <div id="types-grid" class="types-grid"></div>
       </div>
       <div class="card">
-        <h3>Сложные слова</h3>
+        <h3>Точность по форматам</h3>
+        <p class="hint">За выбранный период</p>
+        <div id="formats-accuracy"></div>
+      </div>
+      <div class="card">
+        <h3>Сложные записи</h3>
         <p class="hint">Где ты чаще всего ошибаешься (за всё время)</p>
         <div id="worst-words"></div>
         <button id="btn-train-worst" class="btn-secondary hidden">Потренировать именно их</button>
@@ -76,14 +88,20 @@
 
     <!-- ===== ЭКРАН: СЛОВА ===== -->
     <section id="screen-words" class="screen hidden">
-      <h2>Мои слова</h2>
+      <h2>Мои записи</h2>
       <div class="card">
-        <h3>Добавить слово</h3>
-        <input id="add-es" placeholder="Испанское слово или выражение" maxlength="100">
+        <h3>Добавить запись</h3>
+        <div class="chip-row" id="add-type-chips">
+          <button class="chip active" data-type="word">Слово</button>
+          <button class="chip" data-type="verb">Глагол</button>
+          <button class="chip" data-type="phrase">Выражение</button>
+        </div>
+        <p class="hint" id="add-type-hint">Слово: отдельное существительное, прилагательное или наречие.</p>
+        <input id="add-es" placeholder="На испанском (глагол — в инфинитиве)" maxlength="100">
         <input id="add-ru" placeholder="Перевод на русский" maxlength="200">
         <input id="add-tr" placeholder="Транскрипция кириллицей (необязательно)" maxlength="100">
         <input id="add-ex" placeholder="Пример употребления (необязательно)" maxlength="200">
-        <button id="btn-add-word" class="btn-primary">Добавить слово</button>
+        <button id="btn-add-word" class="btn-primary">Добавить</button>
         <div id="add-msg" class="form-msg"></div>
       </div>
       <input id="word-search" placeholder="Поиск по списку...">
@@ -95,15 +113,15 @@
     <section id="screen-import" class="screen hidden">
       <h2>Импорт и бэкап</h2>
       <div class="card">
-        <h3>Импорт слов из JSON</h3>
-        <p class="hint">Вставь JSON в формате приложения: массив записей с полями es, ru, tr, ex. Дубликаты и битые записи не добавятся.</p>
-        <textarea id="import-json" rows="7" placeholder='[{"es":"hola","ru":"привет","tr":"ола","ex":"Hola, ¿qué tal?"}]'></textarea>
+        <h3>Импорт записей из JSON</h3>
+        <p class="hint">Вставь JSON-массив в формате приложения: у каждой записи поля es, ru, tr, ex, type, priority; для глаголов — forms; для правил — ruleText и ruleQuestions. Дубликаты по полю es и битые записи не добавятся.</p>
+        <textarea id="import-json" rows="7" placeholder='[{"es":"casa","ru":"дом","tr":"коса","ex":"Mi casa es pequeña.","type":"word","priority":9}]'></textarea>
         <button id="btn-import" class="btn-primary">Импортировать</button>
         <div id="import-report" class="form-msg"></div>
       </div>
       <div class="card">
         <h3>Импорт через ИИ-чат</h3>
-        <p class="hint">Нажми кнопку — в буфер скопируется готовый промт. Вставь его в любой ИИ-чат вместе со своим сырым списком слов, получи в ответ JSON и вернись в поле выше.</p>
+        <p class="hint">Нажми кнопку — в буфер скопируется готовый промт. Вставь его в любой ИИ-чат вместе со своим сырым списком, получи в ответ JSON и вернись в поле выше.</p>
         <button id="btn-copy-prompt" class="btn-secondary">Скопировать промт для ИИ</button>
       </div>
       <div class="card">
@@ -130,6 +148,16 @@
         <button id="btn-save-settings" class="btn-primary">Сохранить</button>
         <button id="btn-test" class="btn-secondary">Проверить связь</button>
         <div id="settings-msg" class="form-msg"></div>
+      </div>
+      <div class="card">
+        <h3>Новых записей за тренировку</h3>
+        <p class="hint">Сколько новых слов максимум попадает в одну сессию.</p>
+        <div class="segmented" id="newlimit-chips">
+          <button data-limit="3">3</button>
+          <button data-limit="5" class="active">5</button>
+          <button data-limit="8">8</button>
+          <button data-limit="10">10</button>
+        </div>
       </div>
       <div class="card">
         <h3>Важно про данные</h3>
