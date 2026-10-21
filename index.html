@@ -119,8 +119,8 @@
       <h2>Импорт и бэкап</h2>
       <div class="card">
         <h3>Импорт записей из JSON</h3>
-        <p class="hint">Вставь JSON-массив в формате приложения: у каждой записи поля es, ru, tr, ex, type, priority; для глаголов — forms; для правил — ruleText и ruleQuestions. Дубликаты по полю es и битые записи не добавятся.</p>
-        <textarea id="import-json" rows="7" placeholder='[{"es":"casa","ru":"дом","tr":"коса","ex":"Mi casa es pequeña.","type":"word","priority":9}]'></textarea>
+        <p class="hint">Вставь JSON-массив в формате приложения: у каждой записи поля es, ru, tr, ex, exRu, type, priority; для глаголов — forms; для правил — ruleText и ruleQuestions. Дубликаты по полю es и битые записи не добавятся.</p>
+        <textarea id="import-json" rows="7" placeholder='[{"es":"casa","ru":"дом","tr":"коса","ex":"Mi casa es pequeña.","exRu":"Мой дом маленький.","type":"word","priority":9}]'></textarea>
         <button id="btn-import" class="btn-primary">Импортировать</button>
         <div id="import-report" class="form-msg"></div>
       </div>
@@ -153,6 +153,17 @@
         <button id="btn-save-settings" class="btn-primary">Сохранить</button>
         <button id="btn-test" class="btn-secondary">Проверить связь</button>
         <div id="settings-msg" class="form-msg"></div>
+      </div>
+      <div class="card">
+        <h3>Размер тренировки</h3>
+        <p class="hint">Сколько карточек в одной сессии (без учёта повторов).</p>
+        <div class="segmented" id="size-chips">
+          <button data-size="10">10</button>
+          <button data-size="20">20</button>
+          <button data-size="30">30</button>
+          <button data-size="40">40</button>
+          <button data-size="50">50</button>
+        </div>
       </div>
       <div class="card">
         <h3>Новых записей за тренировку</h3>
