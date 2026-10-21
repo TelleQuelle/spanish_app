@@ -157,12 +157,22 @@ button:active { transform: scale(0.97); }
   border: 1px solid rgba(255, 107, 125, 0.35);
   padding: 13px 18px;
 }
+.btn-dontknow {
+  background: var(--card);
+  color: var(--err);
+  border: 1px solid rgba(255, 107, 125, 0.35);
+  padding: 13px 12px;
+}
 .btn-ghost {
   background: transparent;
   color: var(--muted);
   padding: 8px 12px;
   font-size: 14px;
 }
+
+/* Ряд из двух кнопок одинаковой ширины («Открыть букву» / «Не знаю») */
+.input-row { display: flex; gap: 10px; }
+.input-row button { flex: 1; }
 
 /* ===== Тренировка ===== */
 .train-top {
@@ -211,6 +221,16 @@ button:active { transform: scale(0.97); }
   padding: 14px;
   margin-top: 12px;
   white-space: pre-line;
+}
+
+/* Вопрос внутри карточки теории правила */
+.rule-question {
+  text-align: left;
+  font-size: 16px;
+  font-weight: 700;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
 }
 
 .speak-btn {
@@ -371,7 +391,7 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
 .form-msg.ok { color: var(--ok); }
 .form-msg.err { color: var(--err); }
 
-/* ===== Переключатели (период, лимит) ===== */
+/* ===== Переключатели (период, размер, лимит) ===== */
 .segmented {
   display: flex;
   gap: 4px;
