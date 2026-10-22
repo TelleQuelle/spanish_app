@@ -1,21 +1,14 @@
 'use strict';
 /* ============================================================
-   ОСНОВНАЯ ЛОГИКА «Испанский каждый день» — версия 3
-   Правки против 2.1:
-   - правила: карточка «теория и сразу вопрос», лестницу двигает
-     только ответ на вопрос (кнопки «Понятно»-зачёт больше нет);
-   - размер сессии настраивается: 10/20/30/40/50 карточек;
-   - спряжение в двух форматах: «выбери форму» (лёгкий) и
-     «впиши форму» (сложный, при ошибке — таблица всех форм);
-   - примеры употребления: новые форматы «выбери слово к пропуску»
-     и «переведи пример» (поле exRu — перевод примера);
-   - «вспомни сам» в обе стороны (recall и recall_ru);
-   - кнопка «Не знаю» в форматах с ручным вводом;
-   - первые два показа записи — всегда лёгкие форматы;
-   - ошибка больше НЕ возвращает запись в текущую сессию:
-     сброс лестницы, следующий показ — в следующей тренировке;
-   - стартовым записям дозаполняется exRu из words.js (прогресс
-     сохраняется, база не сбрасывается).
+   ОСНОВНАЯ ЛОГИКА «Испанский каждый день» — версия 4
+   Правки против 3:
+   - новая стартовая база: личный словарь из words.js (270 записей);
+   - версия базы v4: при первом открытии старая база (v3 и раньше)
+     удаляется целиком — «убрать все прошлые слова»;
+   - кнопка «Сбросить прогресс и статистику» в настройках:
+     статусы всех записей → new, стрик/история/статистика обнуляются,
+     словарь и настройки бота сохраняются.
+   Всё остальное (лестница, приоритеты, форматы, статистика) — как в v3.
    ============================================================ */
 
 // ---------- Telegram WebApp: безопасная обёртка ----------
@@ -58,6 +51,7 @@ function tgMainButtonHide() {
 // ---------- Константы ----------
 const DAY_MS = 86400000;
 const STORAGE_KEY = 'spanishApp.v1';
+const DB_VERSION = 4;                  // версия формата базы; смена = полный сброс хранилища
 const INTERVALS = [1, 3, 7, 16, 35];   // лестница интервалов, дней (interval = индекс ступени)
 const MAINTENANCE_DAYS = 75;           // период обслуживания выученных
 const SESSION_SIZE_DEFAULT = 10;       // размер сессии по умолчанию
@@ -251,7 +245,7 @@ function defaultProgress() {
   };
 }
 
-// Запись в формате v3 из стартового объекта
+// Запись в формате v4 из стартового объекта
 function toAppRecord(src) {
   return {
     id: src.id,
@@ -279,21 +273,13 @@ function createStarterDB() {
   return {
     words: STARTER_SET.map(toAppRecord),
     progress: defaultProgress(),
-    v: 3
+    v: DB_VERSION
   };
 }
 
-// Карта exRu стартового набора: дозаполняем старым записям без сброса прогресса
-const EXRU_BY_ID = {};
-STARTER_SET.forEach(function (w) { if (w.exRu) EXRU_BY_ID[w.id] = w.exRu; });
-
-function fillMissingExRu(words) {
-  words.forEach(function (w) {
-    if ((!w.exRu || !String(w.exRu).length) && EXRU_BY_ID[w.id]) {
-      w.exRu = EXRU_BY_ID[w.id];
-    }
-  });
-}
+// Карта стартового набора по id: сброс прогресса возвращает стартовым записям исходный priority
+const STARTER_BY_ID = {};
+STARTER_SET.forEach(function (w) { STARTER_BY_ID[w.id] = w; });
 
 function loadDB() {
   let raw = null;
@@ -301,32 +287,29 @@ function loadDB() {
   if (raw) {
     try {
       const parsed = JSON.parse(raw);
-      const first = parsed && Array.isArray(parsed.words) && parsed.words[0];
-      // Совместимость: совсем старый формат без type — сознательный сброс
-      if (first && typeof first === 'object' && !('type' in first)) {
-        try { localStorage.removeItem(STORAGE_KEY); } catch (e2) {}
-        db = createStarterDB();
-        saveDB();
-        toast('Механика обновлена, прогресс и база сброшены');
-        return;
-      }
-      if (parsed && Array.isArray(parsed.words)) {
+      if (parsed && Array.isArray(parsed.words) && parsed.v === DB_VERSION) {
+        // Актуальная версия: обычная загрузка
         db = {
           words: parsed.words.map(sanitizeRecord),
           progress: sanitizeProgress(parsed.progress),
-          v: 3
+          v: DB_VERSION
         };
-        fillMissingExRu(db.words); // стартовые записи получают перевод примера
-        saveDB();
         return;
       }
+      // Другая версия (старый набор, старый формат или битые данные) —
+      // сознательный полный сброс: словарь заменён, миграция не нужна
+      try { localStorage.removeItem(STORAGE_KEY); } catch (e2) {}
+      db = createStarterDB();
+      saveDB();
+      toast('Словарь обновлён: старый набор удалён, загружен новый');
+      return;
     } catch (e) {
       console.error('Битые данные в localStorage, начинаю с чистой базы', e);
     }
   }
   db = createStarterDB();
   saveDB();
-  toast('Привет! Загружен стартовый набор: 235 записей.');
+  toast('Привет! Загружен твой словарь: 270 записей.');
 }
 
 // Гарантия всех полей у записи (защита от бэкапов с пропусками)
@@ -381,6 +364,39 @@ function sanitizeProgress(p) {
 function saveDB() {
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(db)); }
   catch (e) { toast('Не удалось сохранить данные: хранилище недоступно'); }
+}
+
+// ---------- Сброс прогресса и статистики ----------
+// Статусы всех записей → new, счётчики обнуляются, словарь остаётся.
+// Стартовым записям возвращается исходный priority из words.js;
+// у импортированных исходный приоритет неизвестен — он не меняется.
+// Настройки бота и размер сессии сохраняются.
+function resetProgress() {
+  tgConfirm('Сбросить весь прогресс и статистику? Все записи станут новыми, стрик и история обнулятся. Сам словарь останется. Отменить это нельзя.', function () {
+    db.words.forEach(function (w) {
+      w.status = 'new';
+      w.interval = 0;
+      w.nextShow = '';
+      w.errors = 0;
+      w.correct = 0;
+      w.streakC = 0;
+      const src = STARTER_BY_ID[w.id];
+      if (src) w.priority = clampPriority(src.priority);
+    });
+    const s = db.progress.settings;
+    const keep = {
+      appsScriptUrl: s.appsScriptUrl || '',
+      chatId: s.chatId || '',
+      sessionSize: s.sessionSize || SESSION_SIZE_DEFAULT,
+      newLimit: s.newLimit || NEW_LIMIT_DEFAULT
+    };
+    db.progress = defaultProgress();
+    Object.assign(db.progress.settings, keep);
+    saveDB();
+    showScreen('home');
+    hapticSuccess();
+    toast('Прогресс и статистика сброшены');
+  });
 }
 
 // ---------- Навигация ----------
@@ -1742,7 +1758,7 @@ function exportAll() {
   }
 }
 
-// Восстановление из файла бэкапа (формат v3)
+// Восстановление из файла бэкапа (формат v4)
 function restoreBackup() {
   const input = el('import-backup-file');
   const msg = el('restore-msg');
@@ -1767,9 +1783,8 @@ function restoreBackup() {
         db = {
           words: data.words.map(sanitizeRecord),
           progress: sanitizeProgress(data.progress),
-          v: 3
+          v: DB_VERSION
         };
-        fillMissingExRu(db.words);
         saveDB();
         renderHome();
         msg.classList.add('ok');
@@ -1894,6 +1909,7 @@ function bindAll() {
   el('btn-restore').addEventListener('click', restoreBackup);
   el('btn-save-settings').addEventListener('click', saveSettings);
   el('btn-test').addEventListener('click', testConnection);
+  el('btn-reset-progress').addEventListener('click', resetProgress);
   el('banner-export').addEventListener('click', exportAll);
   el('banner-later').addEventListener('click', function () {
     db.progress.settings.bannerHiddenDay = todayStr();
@@ -1970,6 +1986,7 @@ function bindAll() {
 // ---------- Старт ----------
 function init() {
   tgInit();
+  // В Telegram контент уходит```javascript
   // В Telegram контент уходит под системную шапку — добавляем отступ сверху
   if (tg) {
     try { document.body.classList.add('in-telegram'); } catch (e) {}
@@ -1994,7 +2011,7 @@ function init() {
     saveDB();
   }
 
-  // Параметр запуска startapp=train (кнопка «Учить» в боте) — сразу тренировка
+  // Параметр запуска startapp=train (кнопка «Учить» в бота) — сразу тренировка
   let startParam = '';
   try { startParam = (tg && tg.initDataUnsafe && tg.initDataUnsafe.start_param) || ''; } catch (e) {}
   if (startParam === 'train') { session = null; startStudy(); return; }
@@ -2003,4 +2020,3 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
-
