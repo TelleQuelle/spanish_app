@@ -1,16 +1,21 @@
 'use strict';
 /* ============================================================
-   РЕЖИМ «ДИАЛОГИ» — данные и логика
-   Подключается после app.js и использует его утилиты:
-   el, esc, shuffle, normalizeKey, toast, speak, uid, todayStr,
-   tgConfirm, hapticLight, hapticSuccess, hapticError,
-   showScreen, saveDB, db, SPEAK_ICON.
+   РЕЖИМ «ДИАЛОГИ» — версия 2 (под версию 4 приложения)
+   Полностью автономен: app.js и words.js не меняются.
+   Свои диалоги и статистика хранятся в ОТДЕЛЬНОМ ключе
+   localStorage (spanishDialogs.v1), поэтому сброс прогресса
+   и бэкап приложения на них не влияют.
+   Использует из app.js: el, esc, shuffle, normalizeKey, toast,
+   speak, uid, todayStr, tgConfirm, hapticLight, hapticSuccess,
+   hapticError, showScreen, SPEAK_ICON.
    Три режима: «Читать», «Прослушать», «Тренировать».
-   Плюс создание своих диалогов, импорт JSON и промт для ИИ.
+   Плюс создание своих диалогов, импорт JSON, промт для ИИ
+   и отдельный бэкап диалогов.
    ============================================================ */
 
 // ============================================================
-// СТАРТОВЫЕ ДИАЛОГИ
+// СТАРТОВЫЕ ДИАЛОГИ (20 штук)
+// Лексика — из словаря приложения (words.js / diccionario).
 // who: "me" — реплики пользователя, "other" — реплики собеседника.
 // tr — приблизительное чтение кириллицей.
 // ============================================================
@@ -19,112 +24,376 @@ const DIALOG_SET = [
   {
     id: 'd1',
     title: 'Знакомство',
-    situation: 'Ты знакомишься с Пабло: имена, откуда ты, чем занимаешься, что любишь.',
+    situation: 'Ты знакомишься с Пабло: имена, откуда вы, чем занимаетесь.',
     role: 'Пабло',
     lines: [
       { who: 'other', es: '¡Hola! Soy Pablo. ¿Y tú?', ru: 'Привет! Я Пабло. А ты?', tr: 'ола! сои пабло. и ту?' },
-      { who: 'me', es: 'Hola, Pablo. Me llamo Anna.', ru: 'Привет, Пабло. Меня зовут Анна.', tr: 'ола, пабло. мэ йамо анна' },
-      { who: 'other', es: '¡Encantado, Anna! ¿De dónde eres?', ru: 'Очень приятно, Анна! Откуда ты?', tr: 'энкантадо, анна! дэ дондэ эрэс?' },
+      { who: 'me', es: 'Hola, Pablo. Me llamo Anna.', ru: 'Привет, Пабло. Меня зовут Аня.', tr: 'ола, пабло. мэ йамо анна' },
+      { who: 'other', es: 'Mucho gusto, Anna. ¿De dónde eres?', ru: 'Очень приятно, Аня. Откуда ты?', tr: 'мучо густо, анна. дэ дондэ эрэс?' },
       { who: 'me', es: 'Soy de Rusia, de Moscú.', ru: 'Я из России, из Москвы.', tr: 'сой дэ русиа, дэ моску' },
-      { who: 'other', es: '¡Qué bien! ¿Trabajas o estudias?', ru: 'Как здорово! Ты работаешь или учишься?', tr: 'кэ бьен! трабахас о эстудиас?' },
-      { who: 'me', es: 'Estudio español y trabajo en una oficina.', ru: 'Учусь испанскому и работаю в офисе.', tr: 'эстудио эспаньоль и трабахо эн уна офисина' },
-      { who: 'other', es: '¿Y qué te gusta hacer en tu tiempo libre?', ru: 'А что ты любишь делать в свободное время?', tr: 'и кэ тэ густа асэр эн ту тьэмпо либрэ?' },
-      { who: 'me', es: 'Me gusta leer y escuchar música.', ru: 'Люблю читать и слушать музыку.', tr: 'мэ густа лээр и эскучар мусика' },
-      { who: 'other', es: '¡A mí también! ¿Tomamos un café?', ru: 'И мне! Выпьем кофе?', tr: 'а ми тамбьен! томамос ун кафэ?' },
-      { who: 'me', es: 'Sí, ¡vamos!', ru: 'Да, пойдём!', tr: 'си, вамос!' }
+      { who: 'other', es: 'Encantado. Yo soy de aquí.', ru: 'Очень приятно. А я здешний.', tr: 'энкантадо. йо сой дэ аки' },
+      { who: 'me', es: '¿Y a qué te dedicas, Pablo?', ru: 'А чем ты занимаешься, Пабло?', tr: 'и а кэ тэ дэдикас, пабло?' },
+      { who: 'other', es: 'Soy camarero. Es un trabajo difícil.', ru: 'Я официант. Это трудная работа.', tr: 'сой камарэро. эс ун трабахо дифисиль' },
+      { who: 'me', es: 'Yo soy estudiante. Estudio español.', ru: 'Я студентка. Учусь испанскому.', tr: 'йо сой эстудьантэ. эстудио эспаньоль' },
+      { who: 'other', es: '¡El español es divertido! ¿Verdad?', ru: 'Испанский — весёлый! Не так ли?', tr: 'эль эспаньоль эс дивэртидо! вэрдад?' },
+      { who: 'me', es: 'Sí, y es difícil también.', ru: 'Да, и он сложный тоже.', tr: 'си, и эс дифисиль тамбьен' },
+      { who: 'other', es: 'Bueno, ¡hasta luego, Anna!', ru: 'Ну, до скорого, Аня!', tr: 'буэно, аста луэго, анна!' },
+      { who: 'me', es: '¡Hasta pronto, Pablo!', ru: 'До скорого, Пабло!', tr: 'аста пронто, пабло!' }
     ]
   },
   {
     id: 'd2',
-    title: 'В кафе',
-    situation: 'Ты заходишь в кафе: заказываешь кофе, круассан и воду и платишь.',
-    role: 'Официант',
+    title: 'Как дела?',
+    situation: 'Встреча с Марией: как дела, работа, планы на выходной.',
+    role: 'Мария',
     lines: [
-      { who: 'other', es: 'Buenas tardes, ¿qué le pongo?', ru: 'Добрый день, что вам?', tr: 'буэнас тардэс, кэ лэ понго?' },
-      { who: 'me', es: 'Buenas tardes. Un café con leche, por favor.', ru: 'Добрый день. Кофе с молоком, пожалуйста.', tr: 'буэнас тардэс. ун кафэ кон лэчэ, пор фавор' },
-      { who: 'other', es: '¿Algo para comer?', ru: 'Что-нибудь поесть?', tr: 'альго пара комэр?' },
-      { who: 'me', es: 'Sí, un croissant. ¿Cuánto cuesta?', ru: 'Да, круассан. Сколько стоит?', tr: 'си, ун круасан. куанто куэста?' },
-      { who: 'other', es: 'Dos euros con cincuenta.', ru: 'Два евро пятьдесят.', tr: 'дос эурос кон синкуэнта' },
-      { who: 'me', es: 'Vale. Y un vaso de agua también.', ru: 'Ладно. И стакан воды тоже.', tr: 'вале. и ун басо дэ агуа тамбьен' },
-      { who: 'other', es: '¿Algo más?', ru: 'Что-нибудь ещё?', tr: 'альго мас?' },
-      { who: 'me', es: 'No, eso es todo. ¿Cuánto es en total?', ru: 'Нет, это всё. Сколько всего?', tr: 'но, эсо эс тодо. куанто эс эн тоталь?' },
-      { who: 'other', es: 'Cuatro euros.', ru: 'Четыре евро.', tr: 'куатро эурос' },
-      { who: 'me', es: 'Aquí tiene. ¡Gracias!', ru: 'Вот, возьмите. Спасибо!', tr: 'аки тьэнэ. грасиас!' },
-      { who: 'other', es: '¡Gracias a usted! ¡Hasta luego!', ru: 'Спасибо вам! До встречи!', tr: 'грасиас а устэд! аста луэго!' }
+      { who: 'other', es: '¡Hola, Anna! ¿Qué tal?', ru: 'Привет, Аня! Как дела?', tr: 'ола, анна! кэ таль?' },
+      { who: 'me', es: 'Muy bien, gracias. ¿Y tú?', ru: 'Очень хорошо, спасибо. А ты?', tr: 'муй бьэн, грасиас. и ту?' },
+      { who: 'other', es: 'Más o menos. Es que trabajo mucho.', ru: 'Так себе. Дело в том, что я много работаю.', tr: 'мас о мэнос. эс кэ трабахо мучо' },
+      { who: 'me', es: '¿Trabajas hoy?', ru: 'Ты сегодня работаешь?', tr: 'трабахас ой?' },
+      { who: 'other', es: 'Sí, hoy estoy muy ocupada.', ru: 'Да, сегодня я очень занята.', tr: 'си, ой эстой муй окапада' },
+      { who: 'me', es: '¿Descansas el domingo?', ru: 'Отдыхаешь в воскресенье?', tr: 'дэскансас эль доминго?' },
+      { who: 'other', es: 'Sí, el domingo descanso en casa.', ru: 'Да, в воскресенье я отдыхаю дома.', tr: 'си, эль доминго дэскансо эн коса' },
+      { who: 'me', es: 'Bueno, ¡nos vemos el domingo!', ru: 'Ну, увидимся в воскресенье!', tr: 'буэно, нос вэмос эль доминго!' },
+      { who: 'other', es: '¡Está bien! ¡Hasta luego!', ru: 'Хорошо! До скорого!', tr: 'эста бьэн! аста луэго!' }
     ]
   },
   {
     id: 'd3',
-    title: 'В магазине одежды',
-    situation: 'Ты выбираешь рубашку: размер, примерка, покупка.',
-    role: 'Продавщица',
+    title: 'В кафе',
+    situation: 'Ты заказываешь кофе в кафе и платишь.',
+    role: 'Официант',
     lines: [
-      { who: 'other', es: 'Buenas, ¿puedo ayudarte?', ru: 'Здравствуйте, могу тебе помочь?', tr: 'буэнас, пуэдо айудартэ?' },
-      { who: 'me', es: 'Sí, busco una camisa blanca. Talla M.', ru: 'Да, ищу белую рубашку. Размер M.', tr: 'си, буско уна камиса бланка. тайа эмэ' },
-      { who: 'other', es: '¿Cómo esta?', ru: 'Как эта?', tr: 'комо эста?' },
-      { who: 'me', es: '¿Puedo probármela?', ru: 'Можно примерить?', tr: 'пуэдо пробармэла?' },
-      { who: 'other', es: 'Claro, el probador está allí.', ru: 'Конечно, примерочная вон там.', tr: 'кларо, эль пробадор эста айи' },
-      { who: 'me', es: 'Está un poco grande. ¿Tiene la talla S?', ru: 'Она немного велика. Есть размер S?', tr: 'эста ун поко грандэ. тьэнэ ла тайа эсэ?' },
-      { who: 'other', es: 'Sí, aquí tienes.', ru: 'Да, вот, держи.', tr: 'си, аки тьэнэс' },
-      { who: 'me', es: '¡Me queda bien! ¿Cuánto cuesta?', ru: 'Мне как раз! Сколько стоит?', tr: 'мэ кэда бьен! куанто куэста?' },
-      { who: 'other', es: 'Veinte euros.', ru: 'Двадцать евро.', tr: 'вьэнтэ эурос' },
-      { who: 'me', es: 'Me la llevo. Aquí tiene.', ru: 'Я её возьму. Вот, возьмите.', tr: 'мэ ла йэво. аки тьэнэ' }
+      { who: 'other', es: 'Buenas tardes, señora.', ru: 'Добрый день, госпожа.', tr: 'буэнас тардэс, сеньора' },
+      { who: 'me', es: 'Buenas tardes. Un café, por favor.', ru: 'Добрый день. Кофе, пожалуйста.', tr: 'буэнас тардэс. ун кафэ, пор фавор' },
+      { who: 'other', es: '¿Y para comer?', ru: 'А поесть?', tr: 'и пара комэр?' },
+      { who: 'me', es: 'No, gracias. Solo un café.', ru: 'Нет, спасибо. Только кофе.', tr: 'но, грасиас. соло ун кафэ' },
+      { who: 'other', es: 'Un café para la señora.', ru: 'Кофе для вас.', tr: 'ун кафэ пара ла сеньора' },
+      { who: 'me', es: 'Gracias. ¿Cuánto es?', ru: 'Спасибо. Сколько с меня?', tr: 'грасиас. куанто эс?' },
+      { who: 'other', es: 'Dos euros.', ru: 'Два евро.', tr: 'дос эурос' },
+      { who: 'me', es: 'Aquí tiene. ¡Gracias!', ru: 'Вот, возьмите. Спасибо!', tr: 'аки тьэнэ. грасиас!' },
+      { who: 'other', es: '¡Gracias a usted! ¡Hasta luego!', ru: 'Спасибо вам! До скорого!', tr: 'грасиас а устэд! аста луэго!' },
+      { who: 'me', es: '¡Hasta la vista!', ru: 'До встречи!', tr: 'аста ла виста!' }
     ]
   },
   {
     id: 'd4',
-    title: 'Как пройти к вокзалу',
-    situation: 'Ты спрашиваешь у прохожего дорогу: автобус, билет, время в пути.',
-    role: 'Прохожий',
+    title: 'В магазине',
+    situation: 'Ты покупаешь карандаши: цвет, цена, множественное число.',
+    role: 'Продавщица',
     lines: [
-      { who: 'me', es: 'Perdón, ¿dónde está la estación de tren?', ru: 'Извините, где находится вокзал?', tr: 'пэрдон, дондэ эста ла эстасьон дэ трэн?' },
-      { who: 'other', es: 'Está lejos. Mejor toma el autobús.', ru: 'Далеко. Лучше поезжай на автобусе.', tr: 'эста лэхос. мэхор тома эль аутобус' },
-      { who: 'me', es: '¿Qué autobús me sirve?', ru: 'Какой автобус мне подойдёт?', tr: 'кэ аутобус мэ сирвэ?' },
-      { who: 'other', es: 'El siete. La parada está en esa esquina.', ru: 'Седьмой. Остановка на вон том углу.', tr: 'эль сьэтэ. ла парада эста эн эса эскина' },
-      { who: 'me', es: '¿Cuánto tarda el trayecto?', ru: 'Сколько займёт дорога?', tr: 'куанто тарда эль трайэкто?' },
-      { who: 'other', es: 'Unos diez minutos.', ru: 'Минут десять.', tr: 'унос дьэс минутоc' },
-      { who: 'me', es: '¡Muchas gracias! ¿Y dónde compro el billete?', ru: 'Большое спасибо! А где купить билет?', tr: 'мучас грасиас! и дондэ компро эль бийетэ?' },
-      { who: 'other', es: 'En la misma parada, hay una máquina.', ru: 'На той же остановке, там есть автомат.', tr: 'эн ла мисма парада, ай уна макина' },
-      { who: 'me', es: 'Entendido. ¡Gracias por su ayuda!', ru: 'Понятно. Спасибо за помощь!', tr: 'энтэндидо. грасиас пор су айуда!' },
-      { who: 'other', es: '¡De nada! ¡Buen viaje!', ru: 'Не за что! Хорошей поездки!', tr: 'дэ нада! буэн вьяхэ!' }
+      { who: 'other', es: 'Buenas tardes, joven.', ru: 'Добрый день, молодой человек.', tr: 'буэнас тардэс, ховэн' },
+      { who: 'me', es: 'Buenas tardes. Un lápiz azul, por favor.', ru: 'Добрый день. Синий карандаш, пожалуйста.', tr: 'буэнас тардэс. ун лапис асуль, пор фавор' },
+      { who: 'other', es: 'Un lápiz azul... Ahora, un momento.', ru: 'Синий карандаш... Сейчас, минуту.', tr: 'ун лапис асуль... аора, ун момэнто' },
+      { who: 'other', es: 'Aquí tiene. Es nuevo.', ru: 'Вот, возьмите. Он новый.', tr: 'аки тьэнэ. эс нуэво' },
+      { who: 'me', es: '¿Es bonito? ¿Cuánto cuesta?', ru: 'Он красивый? Сколько стоит?', tr: 'эс бонито? куанто куэста?' },
+      { who: 'other', es: 'Es bonito y barato: un euro.', ru: 'Он красивый и дешёвый: один евро.', tr: 'эс бонито и барато: ун эуро' },
+      { who: 'me', es: 'Es barato. Compro dos.', ru: 'Это дёшево. Беру два.', tr: 'эс барато. компро дос' },
+      { who: 'other', es: '¿Dos lápices?', ru: 'Два карандаша?', tr: 'дос лаписэс?' },
+      { who: 'me', es: 'Sí, dos lápices azules.', ru: 'Да, два синих карандаша.', tr: 'си, дос лаписэс асулэс' },
+      { who: 'other', es: 'Muy bien. Son dos euros.', ru: 'Очень хорошо. Это два евро.', tr: 'муй бьэн. сон дос эурос' },
+      { who: 'me', es: 'Aquí tiene. ¡Gracias!', ru: 'Вот, возьмите. Спасибо!', tr: 'аки тьэнэ. грасиас!' }
     ]
   },
   {
     id: 'd5',
-    title: 'В отеле',
-    situation: 'Ты заселяешься в отель: бронь, завтрак, выезд, вай-фай.',
-    role: 'Администратор',
+    title: 'В университете',
+    situation: 'Разговор с преподавателем перед уроком испанского.',
+    role: 'Профессор',
     lines: [
-      { who: 'other', es: 'Buenas noches, ¿tiene una reserva?', ru: 'Добрый вечер, у вас есть бронь?', tr: 'буэнас ночэс, тьэнэ уна рэсэрва?' },
-      { who: 'me', es: 'Sí, a nombre de Ivanov. Dos noches.', ru: 'Да, на фамилию Иванов. Две ночи.', tr: 'си, а номбрэ дэ иванов. дос ночэс' },
-      { who: 'other', es: 'Un momento... Sí, aquí está. Habitación doble, tercer piso.', ru: 'Минуту... Да, вот. Двухместный номер, третий этаж.', tr: 'ун момэнто... си, аки эста. абитасьон доблэ, тэрсэр писо' },
-      { who: 'me', es: '¿El desayuno está incluido?', ru: 'Завтрак включён?', tr: 'эль дэсайуно эста инклуидо?' },
-      { who: 'other', es: 'Sí, de siete a diez, en la planta baja.', ru: 'Да, с семи до десяти, на первом этаже.', tr: 'си, дэ сьэтэ а дьэс, эн ла планта баха' },
-      { who: 'me', es: '¿A qué hora es la salida?', ru: 'Во сколько выезд?', tr: 'а кэ ора эс ла салида?' },
-      { who: 'other', es: 'A las doce del mediodía.', ru: 'В двенадцать дня.', tr: 'а лос досэ дэль мэдиодиа' },
-      { who: 'me', es: 'Perfecto. ¿Hay wi-fi en la habitación?', ru: 'Отлично. В номере есть вай-фай?', tr: 'пэрфэкто. ай уай-фай эн ла абитасьон?' },
-      { who: 'other', es: 'Sí, la clave está en esta tarjeta.', ru: 'Да, пароль на этой карточке.', tr: 'си, ла клавэ эста эн эста тархэта' },
-      { who: 'me', es: 'Muchas gracias. Buenas noches.', ru: 'Большое спасибо. Доброй ночи.', tr: 'мучас грасиас. буэнас ночэс' }
+      { who: 'other', es: 'Buenos días, Anna. ¿Cómo estás?', ru: 'Добрый день, Аня. Как ты?', tr: 'буэнос диас, анна. комо эстас?' },
+      { who: 'me', es: 'Bien, gracias, profesor. ¿Y usted?', ru: 'Хорошо, спасибо, профессор. А Вы?', tr: 'бьэн, грасиас, профэсор. и устэд?' },
+      { who: 'other', es: 'Muy bien. La clase es a las nueve.', ru: 'Очень хорошо. Урок в девять.', tr: 'муй бьэн. ла класэ эс а лас нуэвэ' },
+      { who: 'me', es: '¿La clase de español?', ru: 'Урок испанского?', tr: 'ла класэ дэ эспаньоль?' },
+      { who: 'other', es: 'Sí. Hoy estudiamos el idioma.', ru: 'Да. Сегодня мы изучаем язык.', tr: 'си. ой эстудиамос эль идиома' },
+      { who: 'me', es: '¿Es difícil el idioma?', ru: 'Язык сложный?', tr: 'эс дифисиль эль идиома?' },
+      { who: 'other', es: 'Un poco. Y muy interesante.', ru: 'Немного. И очень интересный.', tr: 'ун поко. и муй интэрэсантэ' },
+      { who: 'me', es: 'Leo un libro en español ahora.', ru: 'Я сейчас читаю книгу на испанском.', tr: 'лэо ун либро эн эспаньоль аора' },
+      { who: 'other', es: '¡Muy bien! ¿Es interesante?', ru: 'Очень хорошо! Она интересная?', tr: 'муй бьэн! эс интэрэсантэ?' },
+      { who: 'me', es: 'Sí, es un libro bueno.', ru: 'Да, это хорошая книга.', tr: 'си, эс ун либро буэно' },
+      { who: 'other', es: 'Nos vemos en la clase.', ru: 'Увидимся на уроке.', tr: 'нос вэмос эн ла класэ' },
+      { who: 'me', es: '¡Hasta luego, profesor!', ru: 'До скорого, профессор!', tr: 'аста луэго, профэсор!' }
     ]
   },
   {
     id: 'd6',
-    title: 'Такси',
-    situation: 'Ты едешь на такси в аэропорт: маршрут, время в пути, оплата.',
-    role: 'Водитель',
+    title: 'Моя семья',
+    situation: 'Кристина расспрашивает тебя о семье: кто кем работает.',
+    role: 'Кристина',
     lines: [
-      { who: 'other', es: 'Buenas, ¿adónde vamos?', ru: 'Здравствуйте, куда едем?', tr: 'буэнас, адондэ вамос?' },
-      { who: 'me', es: 'Al aeropuerto, por favor.', ru: 'В аэропорт, пожалуйста.', tr: 'аль аэропуэрто, пор фавор' },
-      { who: 'other', es: '¿Por la autopista o por el centro?', ru: 'По трассе или через центр?', tr: 'пор ла аутописта о пор эль сэнтро?' },
-      { who: 'me', es: 'Por donde sea más rápido, tengo prisa.', ru: 'Где быстрее, я спешу.', tr: 'пор дондэ сэа мас рапидо, тэнго приса' },
-      { who: 'other', es: 'Vale, por la autopista entonces.', ru: 'Ладно, тогда по трассе.', tr: 'вале, пор ла аутописта энтонсэс' },
-      { who: 'me', es: '¿Cuánto tardaremos?', ru: 'Сколько будем ехать?', tr: 'куанто тардарэмос?' },
-      { who: 'other', es: 'Unos veinte minutos, si no hay tráfico.', ru: 'Минут двадцать, если нет пробок.', tr: 'унос вьэнтэ минутоc, си но ай трафико' },
-      { who: 'me', es: 'Bien. ¿Puede ir un poco más despacio?', ru: 'Хорошо. Можете ехать немного медленнее?', tr: 'бьен. пуэдэ ир ун поко мас дэспасио?' },
-      { who: 'other', es: 'Tranquilo, sin problema.', ru: 'Спокойно, без проблем.', tr: 'транкило, син проблема' },
-      { who: 'me', es: 'Ya estamos. ¿Cuánto es?', ru: 'Мы на месте. Сколько с меня?', tr: 'йа эстамос. куанто эс?' },
-      { who: 'other', es: 'Veintiocho euros.', ru: 'Двадцать восемь евро.', tr: 'вьэнтиочо эурос' },
-      { who: 'me', es: 'Aquí tiene. ¡Gracias por el viaje!', ru: 'Вот, возьмите. Спасибо за поездку!', tr: 'аки тьэнэ. грасиас пор эль вьяхэ!' }
+      { who: 'other', es: 'Anna, ¿es grande tu familia?', ru: 'Аня, твоя семья большая?', tr: 'анна, эс грандэ ту фамилиа?' },
+      { who: 'me', es: 'Sí, mi familia es grande.', ru: 'Да, моя семья большая.', tr: 'си, ми фамилиа эс грандэ' },
+      { who: 'other', es: '¿Quién trabaja?', ru: 'Кто работает?', tr: 'кьен трабаха?' },
+      { who: 'me', es: 'Mi padre y mi madre. Mi padre es abogado.', ru: 'Папа и мама. Папа адвокат.', tr: 'ми падрэ и ми мадрэ. ми падрэ эс abogado' },
+      { who: 'other', es: '¿Y tu madre?', ru: 'А мама?', tr: 'и ту мадрэ?' },
+      { who: 'me', es: 'Es maestra. Trabaja en una escuela.', ru: 'Она учительница. Работает в школе.', tr: 'эс маэстра. трабаха эн уна эскуэла' },
+      { who: 'other', es: '¿Y tu novio?', ru: 'А твой парень?', tr: 'и ту новьо?' },
+      { who: 'me', es: 'Sí, es ingeniero. Es joven y muy inteligente.', ru: 'Да, он инженер. Он молодой и очень умный.', tr: 'си, эс инхэньеро. эс ховэн и муй интэлихэнтэ' },
+      { who: 'other', es: '¿Y tu abuelo?', ru: 'А дедушка?', tr: 'и ту абвэло?' },
+      { who: 'me', es: 'Mi abuelo tiene ochenta años.', ru: 'Моему дедушке восемьдесят лет.', tr: 'ми абвэло тьэнэ очэнта аньос' },
+      { who: 'other', es: 'Ochenta años... ¡Es joven también!', ru: 'Восемьдесят... Он тоже молодой!', tr: 'очэнта аньос... эс ховэн тамбьэн!' }
+    ]
+  },
+  {
+    id: 'd7',
+    title: 'Выходной',
+    situation: 'Пабло рассказывает, чем занимается в субботу и воскресенье.',
+    role: 'Пабло',
+    lines: [
+      { who: 'other', es: 'Pablo, ¿qué haces el sábado?', ru: 'Пабло, что ты делаешь в субботу?', tr: 'пабло, кэ асэс эль сабадо?' },
+      { who: 'me', es: 'El sábado descanso. Estoy libre.', ru: 'В субботу я отдыхаю. Я свободен.', tr: 'эль сабадо дэскансо. эстой либрэ' },
+      { who: 'other', es: '¿Descansas en casa?', ru: 'Отдыхаешь дома?', tr: 'дэскансас эн коса?' },
+      { who: 'me', es: 'No, escucho música y bailo salsa.', ru: 'Нет, я слушаю музыку и танцую сальсу.', tr: 'но, эскучо мусика и байло сальса' },
+      { who: 'other', es: '¡Bailas muy bien!', ru: 'Ты очень хорошо танцуешь!', tr: 'байлас муй бьэн!' },
+      { who: 'me', es: 'Gracias. ¿Y tú, qué haces el sábado?', ru: 'Спасибо. А ты что делаешь в субботу?', tr: 'грасиас. и ту, кэ асэс эль сабадо?' },
+      { who: 'other', es: 'Leo un libro en el parque. El parque es bonito.', ru: 'Читаю книгу в парке. Парк красивый.', tr: 'лэо ун либро эн эль паркэ. эль паркэ эс бонито' },
+      { who: 'me', es: '¿Y el domingo?', ru: 'А в воскресенье?', tr: 'и эль доминго?' },
+      { who: 'other', es: 'El domingo estoy en casa con la radio.', ru: 'В воскресенье я дома с радио.', tr: 'эль доминго эстой эн коса кон ла радьо' },
+      { who: 'me', es: 'Está bien. Bueno, ¡nos vemos!', ru: 'Хорошо. Ну, увидимся!', tr: 'эста бьэн. буэно, нос вэмос!' },
+      { who: 'other', es: '¡Hasta luego!', ru: 'До скорого!', tr: 'аста луэго!' }
+    ]
+  },
+  {
+    id: 'd8',
+    title: 'Кто это?',
+    situation: 'Мария спрашивает, кто эти люди на фотографии.',
+    role: 'Мария',
+    lines: [
+      { who: 'other', es: '¡Hola, Anna! ¿Quién es él?', ru: 'Привет, Аня! Кто он?', tr: 'ола, анна! кьен эс эль?' },
+      { who: 'me', es: 'Es Pedro. Es mi novio.', ru: 'Это Педро. Мой парень.', tr: 'эс пэдро. эс ми новьо' },
+      { who: 'other', es: '¿Cómo se llama ella?', ru: 'А как её зовут?', tr: 'комо сэ йама эйя?' },
+      { who: 'me', es: 'Se llama María. Es mi amiga.', ru: 'Её зовут Мария. Она моя подруга.', tr: 'сэ йама мария. эс ми амига' },
+      { who: 'other', es: '¿Es española?', ru: 'Она испанка?', tr: 'эс эспаньола?' },
+      { who: 'me', es: 'No, es rusa. De Moscú.', ru: 'Нет, она русская. Из Москвы.', tr: 'но, эс руса. дэ моску' },
+      { who: 'other', es: '¿Y Pedro? ¿Es ruso también?', ru: 'А Педро? Он тоже русский?', tr: 'и пэдро? эс русо тамбьэн?' },
+      { who: 'me', es: 'No, él es español.', ru: 'Нет, он испанец.', tr: 'но, эль эс эспаньоль' },
+      { who: 'other', es: 'Bueno, ¡hasta pronto!', ru: 'Ну, до скорого!', tr: 'буэно, аста пронто!' },
+      { who: 'me', es: '¡Nos vemos!', ru: 'Увидимся!', tr: 'нос вэмос!' }
+    ]
+  },
+  {
+    id: 'd9',
+    title: 'У врача',
+    situation: 'Приём у врача: голова, усталость, отдых.',
+    role: 'Врач',
+    lines: [
+      { who: 'other', es: 'Buenos días. ¿Cómo está usted?', ru: 'Добрый день. Как вы поживаете?', tr: 'буэнос диас. комо эста устэд?' },
+      { who: 'me', es: 'Mal, médico. Estoy enfermo.', ru: 'Плохо, доктор. Я болен.', tr: 'маль, мэдико. эстой энфэрмо' },
+      { who: 'other', es: '¿Qué tal la cabeza?', ru: 'Как голова?', tr: 'кэ таль ла кабэса?' },
+      { who: 'me', es: 'Tengo dolor de cabeza.', ru: 'У меня болит голова.', tr: 'тэнго долор дэ кабэса' },
+      { who: 'other', es: 'Un momento... Está cansado también, ¿verdad?', ru: 'Минуту... Вы и устали, не так ли?', tr: 'ун момэнто... эста кансадо тамбьэн, вэрдад?' },
+      { who: 'me', es: 'Sí, estoy muy cansado. Trabajo mucho.', ru: 'Да, я очень устал. Я много работаю.', tr: 'си, эстой муй кансадо. трабахо мучо' },
+      { who: 'other', es: 'Es que usted trabaja mucho.', ru: 'Дело в том, что вы много работаете.', tr: 'эс кэ устэд трабаха мучо' },
+      { who: 'me', es: 'Sí, es verdad.', ru: 'Да, это правда.', tr: 'си, эс вэрдад' },
+      { who: 'other', es: 'Ahora usted descansa en casa.', ru: 'Сейчас вы отдыхаете дома.', tr: 'аора устэд дэсканса эн коса' },
+      { who: 'me', es: 'Está bien, médico. ¡Gracias!', ru: 'Хорошо, доктор. Спасибо!', tr: 'эста бьэн, мэдико. грасиас!' },
+      { who: 'other', es: 'Hasta pronto. Y no fuma, ¿verdad?', ru: 'До скорого. И не курите, не так ли?', tr: 'аста пронто. и но фума, вэрдад?' },
+      { who: 'me', es: 'No, no fumo.', ru: 'Нет, не курю.', tr: 'но, но фумо' }
+    ]
+  },
+  {
+    id: 'd10',
+    title: 'Фотография',
+    situation: 'Хуан рассматривает твою фотографию и расспрашивает о людях на ней.',
+    role: 'Хуан',
+    lines: [
+      { who: 'other', es: '¿Qué es esto?', ru: 'Что это?', tr: 'кэ эс эсто?' },
+      { who: 'me', es: 'Es una foto.', ru: 'Это фотография.', tr: 'эс уна фото' },
+      { who: 'other', es: '¿Quién es ella?', ru: 'Кто она?', tr: 'кьен эс эйя?' },
+      { who: 'me', es: 'Es mi amiga. Es médica.', ru: 'Это моя подруга. Она врач.', tr: 'эс ми амига. эс мэдика' },
+      { who: 'other', es: '¿Es alegre?', ru: 'Она весёлая?', tr: 'эс алэгрэ?' },
+      { who: 'me', es: 'Sí, es muy alegre y joven.', ru: 'Да, она очень весёлая и молодая.', tr: 'си, эс муй алэгрэ и ховэн' },
+      { who: 'other', es: '¿Y quién es él?', ru: 'А кто он?', tr: 'и кьен эс эль?' },
+      { who: 'me', es: 'Es el novio de María.', ru: 'Это парень Марии.', tr: 'эс эль новьо дэ мария' },
+      { who: 'other', es: '¿Es pintor?', ru: 'Он художник?', tr: 'эс пинтор?' },
+      { who: 'me', es: 'No, es pianista.', ru: 'Нет, он пианист.', tr: 'но, эс пианиста' },
+      { who: 'other', es: 'La foto es bonita.', ru: 'Фотография красивая.', tr: 'ла фото эс бонита' },
+      { who: 'me', es: 'Sí, y la chica es hermosa.', ru: 'Да, и девушка прекрасная.', tr: 'си, и ла чика эс эрмоса' }
+    ]
+  },
+  {
+    id: 'd11',
+    title: 'Книга',
+    situation: 'Ты покупаешь книгу на испанском в магазине.',
+    role: 'Продавец',
+    lines: [
+      { who: 'other', es: 'Buenas tardes.', ru: 'Добрый день.', tr: 'буэнас тардэс' },
+      { who: 'me', es: 'Buenas tardes. Un libro, por favor.', ru: 'Добрый день. Книгу, пожалуйста.', tr: 'буэнас тардэс. ун либро, пор фавор' },
+      { who: 'other', es: '¿Un libro en español?', ru: 'Книгу на испанском?', tr: 'ун либро эн эспаньоль?' },
+      { who: 'me', es: 'Sí, un libro fácil.', ru: 'Да, лёгкую книгу.', tr: 'си, ун либро фасиль' },
+      { who: 'other', es: 'Es un libro fácil y interesante.', ru: 'Это лёгкая и интересная книга.', tr: 'эс ун либро фасиль и интэрэсантэ' },
+      { who: 'me', es: '¿Cuánto cuesta?', ru: 'Сколько стоит?', tr: 'куанто куэста?' },
+      { who: 'other', es: 'Diez euros.', ru: 'Десять евро.', tr: 'дьес эурос' },
+      { who: 'me', es: 'Es barato. Aquí tiene.', ru: 'Дёшево. Вот, возьмите.', tr: 'эс барато. аки тьэнэ' },
+      { who: 'other', es: '¡Gracias! Ahora lee y habla español.', ru: 'Спасибо! Теперь читай и говори по-испански.', tr: 'грасиас! аора лээ и абла эспаньоль' },
+      { who: 'me', es: '¡Sí! ¡Hasta luego!', ru: 'Да! До скорого!', tr: 'си! аста луэго!' }
+    ]
+  },
+  {
+    id: 'd12',
+    title: 'В парке',
+    situation: 'Прогулка с Пабло: где вы живёте, какие у вас дома.',
+    role: 'Пабло',
+    lines: [
+      { who: 'other', es: '¡Hola, Anna! El parque es bonito, ¿verdad?', ru: 'Привет, Аня! Парк красивый, правда?', tr: 'ола, анна! эль паркэ эс бонито, вэрдад?' },
+      { who: 'me', es: 'Sí, es muy bonito. ¿Dónde vives, Pablo?', ru: 'Да, очень красивый. Где ты живёшь, Пабло?', tr: 'си, эс муй бонито. дондэ вивэс, пабло?' },
+      { who: 'other', es: 'Vivo en la ciudad. Mi casa es pequeña.', ru: 'Я живу в городе. Мой дом маленький.', tr: 'виво эн ла сьюдад. ми коса эс пэкэньо' },
+      { who: 'me', es: '¿Está tu casa cerca?', ru: 'Твой дом рядом?', tr: 'эста ту коса сэрка?' },
+      { who: 'other', es: 'Sí, muy cerca.', ru: 'Да, очень близко.', tr: 'си, муй сэрка' },
+      { who: 'me', es: 'Y mi casa es grande. Está en Moscú.', ru: 'А мой дом большой. Он в Москве.', tr: 'и ми коса эс грандэ. эста эн моску' },
+      { who: 'other', es: '¿Es una casa hermosa?', ru: 'Это красивый дом?', tr: 'эс уна коса эрмоса?' },
+      { who: 'me', es: 'Sí, hermosa y vieja.', ru: 'Да, красивый и старый.', tr: 'си, эрмоса и вьэха' },
+      { who: 'other', es: 'Viejo y hermoso — es bueno.', ru: 'Старый и красивый — это хорошо.', tr: 'вьэхо и эрмосо — эс буэно' },
+      { who: 'me', es: 'Claro. Bueno, ¡hasta luego!', ru: 'Конечно. Ну, до скорого!', tr: 'кларо. буэно, аста луэго!' }
+    ]
+  },
+  {
+    id: 'd13',
+    title: 'Тоже и тоже не',
+    situation: 'Разговор о языках: también, tampoco и какой ты полиглот.',
+    role: 'Мария',
+    lines: [
+      { who: 'other', es: 'Anna, ¿hablas francés?', ru: 'Аня, ты говоришь по-французски?', tr: 'анна, аблас франсэс?' },
+      { who: 'me', es: 'No, no hablo francés.', ru: 'Нет, я не говорю по-французски.', tr: 'но, но абло франсэс' },
+      { who: 'other', es: 'Yo tampoco. Hablo español y ruso.', ru: 'Я тоже нет. Говорю по-испански и по-русски.', tr: 'йо тампочко. абло эспаньоль и русо' },
+      { who: 'me', es: 'Yo también hablo ruso. Es mi idioma.', ru: 'Я тоже говорю по-русски. Это мой язык.', tr: 'йо тамбьэн абло русо. эс ми идиома' },
+      { who: 'other', es: '¿Y el español?', ru: 'А испанский?', tr: 'и эль эспаньоль?' },
+      { who: 'me', es: 'Hablo un poco. Es difícil.', ru: 'Говорю немного. Он сложный.', tr: 'абло ун поко. эс дифисиль' },
+      { who: 'other', es: 'Es difícil. Y es divertido también.', ru: 'Он сложный. И он тоже весёлый.', tr: 'эс дифисиль. и эс дивэртидо тамбьэн' },
+      { who: 'me', es: 'Creo que sí.', ru: 'Думаю, что да.', tr: 'крэо кэ си' },
+      { who: 'other', es: 'Ahora estudiamos español.', ru: 'Теперь мы учим испанский.', tr: 'аора эстудиамос эспаньоль' },
+      { who: 'me', es: 'Sí, ¡vamos!', ru: 'Да, пойдём!', tr: 'си, вамос!' }
+    ]
+  },
+  {
+    id: 'd14',
+    title: 'Вечером',
+    situation: 'Мария расспрашивает, что ты делаешь вечером.',
+    role: 'Мария',
+    lines: [
+      { who: 'other', es: '¿Qué haces por la noche, Anna?', ru: 'Что ты делаешь вечером, Аня?', tr: 'кэ асэс пор ла ночэ, анна?' },
+      { who: 'me', es: 'Leo un libro o escucho la radio.', ru: 'Читаю книгу или слушаю радио.', tr: 'лэо ун либро о эскучо ла радьо' },
+      { who: 'other', es: '¿En español?', ru: 'На испанском?', tr: 'эн эспаньоль?' },
+      { who: 'me', es: 'Sí, en español. Es un poco difícil.', ru: 'Да, на испанском. Немного сложно.', tr: 'си, эн эспаньоль. эс ун поко дифисиль' },
+      { who: 'other', es: '¿Y bebes café por la noche?', ru: 'А пьёшь кофе вечером?', tr: 'и бэбэс кафэ пор ла ночэ?' },
+      { who: 'me', es: 'Sí, bebo mucho café.', ru: 'Да, я пью много кофе.', tr: 'си, бэбо мучо кафэ' },
+      { who: 'other', es: 'El café por la noche... Está mal, ¿no?', ru: 'Кофе вечером... Плохо, не так ли?', tr: 'эль кафэ пор ла ночэ... эста маль, но?' },
+      { who: 'me', es: '¿Está mal? ¿Por qué?', ru: 'Плохо? Почему?', tr: 'эста маль? пор кэ?' },
+      { who: 'other', es: 'La noche es para descansar.', ru: 'Вечер — для отдыха.', tr: 'ла ночэ эс пара дэскансар' },
+      { who: 'me', es: 'Es verdad. Bueno, ¡hasta mañana!', ru: 'Это правда. Ну, до завтра!', tr: 'эс вэрдад. буэно, аста маньяна!' },
+      { who: 'other', es: '¡Hasta mañana, Anna!', ru: 'До завтра, Аня!', tr: 'аста маньяна, анна!' }
+    ]
+  },
+  {
+    id: 'd15',
+    title: 'Музыка',
+    situation: 'Разговор о музыке, пении и танцах, договорённость о субботе.',
+    role: 'Пабло',
+    lines: [
+      { who: 'other', es: '¿Escuchas música, Anna?', ru: 'Ты слушаешь музыку, Аня?', tr: 'эскучас мусика, анна?' },
+      { who: 'me', es: 'Sí, escucho música ahora.', ru: 'Да, я слушаю музыку сейчас.', tr: 'си, эскучо мусика аора' },
+      { who: 'other', es: '¿Y cantas?', ru: 'А поёшь?', tr: 'и кантас?' },
+      { who: 'me', es: 'Cantar... no, canto mal.', ru: 'Петь... нет, я пою плохо.', tr: 'кантар... но, канто маль' },
+      { who: 'other', es: 'Yo también canto mal. ¡Fatal!', ru: 'Я тоже пою плохо. Ужасно!', tr: 'йо тамбьэн канто маль. фаталь!' },
+      { who: 'me', es: '¡No pasa nada! Es divertido.', ru: 'Ничего страшного! Это весело.', tr: 'но паса нада! эс дивэртидо' },
+      { who: 'other', es: '¿Bailas salsa?', ru: 'Танцуешь сальсу?', tr: 'байлас сальса?' },
+      { who: 'me', es: 'Sí, bailo salsa los sábados.', ru: 'Да, я танцую сальсу по субботам.', tr: 'си, байло сальса лос сабадос' },
+      { who: 'other', es: '¡Yo también! ¿Vamos el sábado?', ru: 'Я тоже! Пойдём в субботу?', tr: 'йо тамбьэн! вамос эль сабадо?' },
+      { who: 'me', es: 'Sí, ¡está bien!', ru: 'Да, хорошо!', tr: 'си, эста бьэн!' }
+    ]
+  },
+  {
+    id: 'd16',
+    title: 'Жизнь в Испании',
+    situation: 'Хуан расспрашивает о твоей жизни в Испании: город, климат, работа.',
+    role: 'Хуан',
+    lines: [
+      { who: 'other', es: '¿Dónde vives ahora, Anna?', ru: 'Где ты теперь живёшь, Аня?', tr: 'дондэ вивэс аора, анна?' },
+      { who: 'me', es: 'Ahora vivo en España.', ru: 'Теперь я живу в Испании.', tr: 'аора виво эн эспанья' },
+      { who: 'other', es: '¿En una ciudad grande?', ru: 'В большом городе?', tr: 'эн уна сьюдад грандэ?' },
+      { who: 'me', es: 'No, en una ciudad pequeña. Es hermosa.', ru: 'Нет, в маленьком городе. Он прекрасный.', tr: 'но, эн уна сьюдад пэкэнья. эс эрмоса' },
+      { who: 'other', es: '¿Y el clima?', ru: 'А климат?', tr: 'и эль клима?' },
+      { who: 'me', es: 'El clima es agradable.', ru: 'Климат приятный.', tr: 'эль клима эс аградаблэ' },
+      { who: 'other', es: '¿Trabajas en España?', ru: 'Работаешь в Испании?', tr: 'трабахас эн эспанья?' },
+      { who: 'me', es: 'Sí, soy intérprete.', ru: 'Да, я переводчица.', tr: 'си, сой интерпрэтэ' },
+      { who: 'other', es: '¡Muy bien! ¿Es un trabajo interesante?', ru: 'Очень хорошо! Это интересная работа?', tr: 'муй бьэн! эс ун трабахо интэрэсантэ?' },
+      { who: 'me', es: 'Sí, es muy interesante.', ru: 'Да, очень интересная.', tr: 'си, эс муй интэрэсантэ' },
+      { who: 'other', es: '¿Y la vida en España?', ru: 'А жизнь в Испании?', tr: 'и ла вида эн эспанья?' },
+      { who: 'me', es: 'La vida es bella.', ru: 'Жизнь прекрасна.', tr: 'ла вида эс бэйа' }
+    ]
+  },
+  {
+    id: 'd17',
+    title: 'Прощание',
+    situation: 'Вечерний разговор с Пабло: усталость и договорённость на завтра.',
+    role: 'Пабло',
+    lines: [
+      { who: 'other', es: 'Buenas noches, Anna.', ru: 'Добрый вечер, Аня.', tr: 'буэнас ночэс, анна' },
+      { who: 'me', es: 'Buenas noches, Pablo. ¿Qué tal?', ru: 'Добрый вечер, Пабло. Как дела?', tr: 'буэнас ночэс, пабло. кэ таль?' },
+      { who: 'other', es: 'Vamos tirando. ¿Y tú?', ru: 'Потихоньку. А ты?', tr: 'вамос тирандо. и ту?' },
+      { who: 'me', es: 'Regular. Estoy muy cansada.', ru: 'Так себе. Я очень устала.', tr: 'рэгулар. эстой муй кансада' },
+      { who: 'other', es: 'Es tarde, ¿no?', ru: 'Уже поздно, не так ли?', tr: 'эс тардэ, но?' },
+      { who: 'me', es: 'Sí, es tarde. Yo estoy en casa ahora.', ru: 'Да, поздно. Я сейчас дома.', tr: 'си, эс тардэ. йо эстой эн коса аора' },
+      { who: 'other', es: 'Bueno. ¿Nos vemos mañana?', ru: 'Ну. Увидимся завтра?', tr: 'буэно. нос вэмос маньяна?' },
+      { who: 'me', es: '¿A las nueve?', ru: 'В девять?', tr: 'а лас нуэвэ?' },
+      { who: 'other', es: 'Sí, a las nueve. ¡Hasta la vista!', ru: 'Да, в девять. До встречи!', tr: 'си, а лас нуэвэ. аста ла виста!' },
+      { who: 'me', es: '¡Hasta pronto, Pablo!', ru: 'До скорого, Пабло!', tr: 'аста пронто, пабло!' }
+    ]
+  },
+  {
+    id: 'd18',
+    title: 'Профессии',
+    situation: 'Хуан расспрашивает, кем работают ты и твоя семья.',
+    role: 'Хуан',
+    lines: [
+      { who: 'other', es: '¿A qué te dedicas, Anna?', ru: 'Чем ты занимаешься, Аня?', tr: 'а кэ тэ дэдикас, анна?' },
+      { who: 'me', es: 'Soy periodista. Escribo historias.', ru: 'Я журналистка. Пишу истории.', tr: 'сой пэрьодиста. эскрибо историас' },
+      { who: 'other', es: '¡Interesante! ¿Y tu padre?', ru: 'Интересно! А твой отец?', tr: 'интэрэсантэ! и ту падрэ?' },
+      { who: 'me', es: 'Mi padre es cirujano. Trabaja en un hospital.', ru: 'Мой отец хирург. Работает в больнице.', tr: 'ми падрэ эс сирухано. трабаха эн ун оспиталь' },
+      { who: 'other', es: '¿Y tu madre es médica también?', ru: 'А мама тоже врач?', tr: 'и ту мадрэ эс мэдика тамбьэн?' },
+      { who: 'me', es: 'No, ella es maestra.', ru: 'Нет, она учительница.', tr: 'но, эйя эс маэстра' },
+      { who: 'other', es: '¿Y tu novio?', ru: 'А твой парень?', tr: 'и ту новьо?' },
+      { who: 'me', es: 'Él es arquitecto.', ru: 'Он архитектор.', tr: 'эль эс аркитэкто' },
+      { who: 'other', es: 'Tu familia es inteligente.', ru: 'Твоя семья умная.', tr: 'ту фамилиа эс интэлихэнтэ' },
+      { who: 'me', es: 'Sí, y trabajamos mucho.', ru: 'Да, и мы много работаем.', tr: 'си, и трабахамос мучо' }
+    ]
+  },
+  {
+    id: 'd19',
+    title: 'Возраст',
+    situation: 'Кристина расспрашивает, сколько лет тебе и твоим близким.',
+    role: 'Кристина',
+    lines: [
+      { who: 'other', es: 'Anna, ¿tú tienes veinte años?', ru: 'Аня, тебе двадцать лет?', tr: 'анна, ту тьэнэс вэйнтэ аньос?' },
+      { who: 'me', es: 'No, tengo veintidós años.', ru: 'Нет, мне двадцать два.', tr: 'но, тэнго вэйнтидос аньос' },
+      { who: 'other', es: '¿Y María? ¿Es joven?', ru: 'А Мария? Она молодая?', tr: 'и мария? эс ховэн?' },
+      { who: 'me', es: 'Sí, tiene veinte años.', ru: 'Да, ей двадцать.', tr: 'си, тьэнэ вэйнтэ аньос' },
+      { who: 'other', es: '¿Y tu abuela?', ru: 'А бабушка?', tr: 'и ту абвэла?' },
+      { who: 'me', es: 'Mi abuela tiene sesenta años.', ru: 'Моей бабушке шестьдесят.', tr: 'ми абвэла тьэнэ сэсэнта аньос' },
+      { who: 'other', es: '¿Y el abuelo de María?', ru: 'А дедушка Марии?', tr: 'и эль абвэло дэ мария?' },
+      { who: 'me', es: 'Él tiene setenta años.', ru: 'Ему семьдесят.', tr: 'эль тьэнэ сэтэнта аньос' },
+      { who: 'other', es: 'Es una familia joven.', ru: 'Это молодая семья.', tr: 'эс уна фамилиа ховэн' },
+      { who: 'me', es: 'Sí, y muy alegre.', ru: 'Да, и очень весёлая.', tr: 'си, и муй алэгрэ' }
+    ]
+  },
+  {
+    id: 'd20',
+    title: 'Климат',
+    situation: 'Сравниваете климат России и Испании, письмо подруге.',
+    role: 'Хуан',
+    lines: [
+      { who: 'other', es: '¿Qué tal el clima en Rusia?', ru: 'Как климат в России?', tr: 'кэ таль эль клима эн русиа?' },
+      { who: 'me', es: 'El clima es difícil: cero grados hoy.', ru: 'Климат суровый: сегодня ноль градусов.', tr: 'эль клима эс дифисиль: сэро градос ой' },
+      { who: 'other', es: '¿Cero? ¡Fatal!', ru: 'Ноль? Ужасно!', tr: 'сэро? фаталь!' },
+      { who: 'me', es: 'Sí. ¿Y el clima en España?', ru: 'Да. А климат в Испании?', tr: 'си. и эль клима эн эспанья?' },
+      { who: 'other', es: 'El clima es agradable: ahora son veinte grados.', ru: 'Климат приятный: сейчас двадцать градусов.', tr: 'эль клима эс аградаблэ: аора сон вэйнтэ градос' },
+      { who: 'me', es: '¡Muy bien! Ahora escribo una carta a mi amiga de España.', ru: 'Очень хорошо! Сейчас я пишу письмо подруге из Испании.', tr: 'муй бьэн! аора эскрибо уна карта а ми амига дэ эспанья' },
+      { who: 'other', es: '¿Tu amiga vive en España?', ru: 'Твоя подруга живёт в Испании?', tr: 'ту амига вивэ эн эспанья?' },
+      { who: 'me', es: 'Sí, en una ciudad pequeña.', ru: 'Да, в маленьком городе.', tr: 'си, эн уна сьюдад пэкэнья' },
+      { who: 'other', es: '¡Bonito! ¿Y tú vives en Moscú?', ru: 'Красиво! А ты живёшь в Москве?', tr: 'бонито! и ту вивэс эн моску?' },
+      { who: 'me', es: 'Sí, mi casa está en Moscú.', ru: 'Да, мой дом в Москве.', tr: 'си, ми коса эста эн моску' },
+      { who: 'other', es: 'Bueno, ¡hasta luego, Anna!', ru: 'Ну, до скорого, Аня!', tr: 'буэно, аста луэго, анна!' },
+      { who: 'me', es: '¡Nos vemos, Juan!', ru: 'Увидимся, Хуан!', tr: 'нос вэмос, хуан!' }
     ]
   }
 ];
@@ -136,66 +405,93 @@ const PROMPT_DIALOG_TEMPLATE = [
   'Твоя задача — сделать из этого JSON-массив учебных диалогов.',
   '',
   'Формат каждого диалога:',
-  '{"title":"Название по-русски","situation":"Кто, с кем и о чём говорит, по-русски, одно предложение","role":"Кто такой собеседник, по-русски, одно-два слова (Официант, Прохожий, Администратор...)","lines":[{"who":"other","es":"...","ru":"...","tr":"кириллицей"},{"who":"me","es":"...","ru":"...","tr":"кириллицей"}]}',
+  '{"title":"Название по-русски","situation":"Кто, с кем и о чём говорит, по-русски, одно предложение","role":"Кто такой собеседник, по-русски, одно-два слова (Официант, Прохожий, Врач...)","lines":[{"who":"other","es":"...","ru":"...","tr":"кириллицей"},{"who":"me","es":"...","ru":"...","tr":"кириллицей"}]}',
   '',
   'Правила:',
   '1. "who": "me" — реплики пользователя (то, что он учится говорить сам), "other" — реплики собеседника.',
-  '2. В каждом диалоге 8–12 реплик, они чередуются; уровень языка A1–A2, простые бытовые фразы.',
+  '2. В каждом диалоге 8–12 реплик, они чередуются; уровень языка A1, простые бытовые фразы.',
   '3. Реплик "me" в каждом диалоге не меньше 4 — именно их пользователь будет тренировать.',
   '4. "es" — реплика на испанском; "ru" — дословный перевод на русский; "tr" — примерное чтение кириллицей по правилам испанского произношения.',
-  '5. Если я дал готовый текст — сохрани его смысл и реплики, исправь ошибки, добавь недостающие реплики с обеих сторон, чтобы диалог звучал естественно.',
-  '6. Если дал одну тему — сделай ОДИН диалог по ней. Если дал список тем — по одному диалогу на каждую тему.',
-  '7. Ответ должен быть ТОЛЬКО JSON-массивом. Первый символ ответа — [, последний — ]. Никакого текста до или после, никаких пояснений, никаких markdown-обёрток.',
-  '8. Поля id, own НЕ добавляй — приложение проставит их само.',
-  '9. Если по теме невозможно составить диалог, ответь ровно одной строкой: НЕ ПОНЯЛ ТЕМУ',
+  '5. Используй только простую частотную лексику уровня A1: ser, estar, hablar, comer, vivir, trabajar, estudiar, descansar, bailar, cantar, escuchar, beber, leer, creer, comprar, escribir, conocer, hacer.',
+  '6. Если я дал готовый текст — сохрани его смысл и реплики, исправь ошибки, добавь недостающие реплики с обеих сторон, чтобы диалог звучал естественно.',
+  '7. Если дал одну тему — сделай ОДИН диалог по ней. Если дал список тем — по одному диалогу на каждую тему.',
+  '8. Ответ должен быть ТОЛЬКО JSON-массивом. Первый символ ответа — [, последний — ]. Никакого текста до или после, никаких пояснений, никаких markdown-обёрток.',
+  '9. Поля id, own НЕ добавляй — приложение проставит их само.',
+  '10. Если по теме невозможно составить диалог, ответь ровно одной строкой: НЕ ПОНЯЛ ТЕМУ',
   '',
   'Моя тема или текст:'
 ].join('\n');
+
+// ---------- Отдельное хранилище диалогов ----------
+const DIALOGS_KEY = 'spanishDialogs.v1';
+let dialogStore = { own: [], stats: {} };
+
+function loadDialogStore() {
+  let raw = null;
+  try { raw = localStorage.getItem(DIALOGS_KEY); } catch (e) { console.warn('localStorage недоступен', e); }
+  if (raw) {
+    try {
+      const p = JSON.parse(raw);
+      dialogStore = {
+        own: Array.isArray(p.own) ? p.own : [],
+        stats: (p.stats && typeof p.stats === 'object') ? p.stats : {}
+      };
+      return;
+    } catch (e) {
+      console.error('Битые данные диалогов, начинаю с пустого набора', e);
+    }
+  }
+  dialogStore = { own: [], stats: {} };
+}
+
+function saveDialogStore() {
+  try { localStorage.setItem(DIALOGS_KEY, JSON.stringify(dialogStore)); }
+  catch (e) { toast('Не удалось сохранить диалоги: хранилище недоступно'); }
+}
 
 // ---------- Состояние режима ----------
 let dialogView = null;   // открытый диалог: { dialog, mode, idx, playing, queue, ... }
 let draftLines = [];     // черновик создаваемого диалога
 let draftWho = 'other';  // чья реплика добавляется в черновик
 
-// Гарантия полей диалогов в базе (для баз, созданных до этого режима)
-function ensureDialogState() {
-  if (!db) return;
-  if (!Array.isArray(db.dialogs)) db.dialogs = [];
-  if (!db.progress.dialogs || typeof db.progress.dialogs !== 'object') db.progress.dialogs = {};
-}
-
 // Все диалоги: стартовые + созданные пользователем
 function allDialogs() {
-  return DIALOG_SET.concat(db.dialogs || []);
+  return DIALOG_SET.concat(dialogStore.own);
 }
 
-// Прогресс по диалогу: { plays, trains, best }
-function dialogProgress(id) {
-  return (db.progress.dialogs && db.progress.dialogs[id]) || { plays: 0, trains: 0, best: -1 };
+// Статистика по диалогу: { plays, trains, best }
+function dialogStats(id) {
+  return dialogStore.stats[id] || { plays: 0, trains: 0, best: -1 };
+}
+
+// Переход к списку диалогов (showScreen из app.js не знает про рендер списка)
+function goDialogsList() {
+  stopPlay();
+  showScreen('dialogs');
+  renderDialogsList();
 }
 
 // ---------- Список диалогов ----------
 function renderDialogsList() {
   const list = el('dialogs-list');
   if (!list) return;
-  ensureDialogState();
   const dialogs = allDialogs();
   let html = '';
   dialogs.forEach(function (d) {
     const lines = Array.isArray(d.lines) ? d.lines : [];
-    const pr = dialogProgress(d.id);
+    const st = dialogStats(d.id);
     const meCount = lines.filter(function (l) { return l.who === 'me'; }).length;
-    const best = pr.best >= 0 ? pr.best + '%' : '–';
+    const best = st.best >= 0 ? st.best + '%' : '–';
     html += '<div class="dialog-card">' +
       '<div class="dlg-top"><div class="dlg-title">' + esc(d.title) + '</div>' +
       '<span class="dlg-badge">' + esc(d.role || 'диалог') + '</span></div>' +
       (d.situation ? '<div class="dlg-situation">' + esc(d.situation) + '</div>' : '') +
       '<div class="dlg-meta">' + lines.length + ' реплик · твоих: ' + meCount +
-      ' · тренировок: ' + pr.trains + ' · лучший результат: ' + best + '</div>' +
-      '<div class="dlg-best"><div class="dlg-best-fill" style="width:' + (pr.best >= 0 ? pr.best : 0) + '%"></div></div>' +
+      ' · тренировок: ' + st.trains + ' · лучший результат: ' + best + '</div>' +
+      '<div class="dlg-best"><div class="dlg-best-fill" style="width:' + (st.best >= 0 ? st.best : 0) + '%"></div></div>' +
       '<div class="dlg-actions">' +
       '<button class="dlg-btn-read" data-id="' + esc(d.id) + '" data-mode="read">Читать</button>' +
-      '<button class="dlg-btn-play" data-id="' + esc(d.id) + '" data-mode="play">Прослушать</button>' +
+      '<button class="dlg-btn-play" data-id="' + esc(d.id) + '" data-mode="play">Слушать</button>' +
       '<button class="dlg-btn-train" data-id="' + esc(d.id) + '" data-mode="train">Тренировать</button>' +
       (d.own ? '<button class="dlg-del" data-del="' + esc(d.id) + '" aria-label="Удалить">×</button>' : '') +
       '</div></div>';
@@ -219,10 +515,14 @@ function openDialogView(id, mode) {
   stopPlay();
   dialogView = {
     dialog: d, mode: mode, idx: 0, playing: false,
-    queue: [], answered: 0, correct: 0, total: 0
+    queue: [], answered: 0, correct: 0
   };
   el('dlg-view-title').textContent = d.title;
   showScreen('dialog-view');
+  // showScreen не знает вкладку dialog-view — подсвечиваем «Диалоги» вручную
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.classList.toggle('active', t.dataset.screen === 'dialogs');
+  });
   if (mode === 'read') startRead();
   else if (mode === 'play') startPlay();
   else startTrain();
@@ -243,16 +543,14 @@ function appendRoleLabel(role) {
   feed.appendChild(lab);
 }
 
-// HTML пузыря. opts.tr === false — без транскрипции, opts.ru === false — без перевода,
-// opts.fix + opts.fixText — пометка об ошибке
+// HTML пузыря. opts.tr === false — без транскрипции
 function bubbleHTML(line, opts) {
   opts = opts || {};
   const me = line.who === 'me';
-  let html = '<div class="bubble ' + (me ? 'me' : 'other') + (opts.fix ? ' fix' : '') + '">' +
+  let html = '<div class="bubble ' + (me ? 'me' : 'other') + '">' +
     '<div class="b-es">' + esc(line.es) + '</div>';
   if (opts.tr !== false && line.tr) html += '<div class="b-tr">' + esc(line.tr) + '</div>';
-  if (opts.ru !== false) html += '<div class="b-ru">' + esc(line.ru) + '</div>';
-  if (opts.fix && opts.fixText) html += '<div class="b-note">' + esc(opts.fixText) + '</div>';
+  html += '<div class="b-ru">' + esc(line.ru) + '</div>';
   html += '<button class="b-speak" aria-label="Озвучить">' + SPEAK_ICON + '</button></div>';
   return html;
 }
@@ -307,11 +605,11 @@ function appendReadBubble() {
     el('chat-train2').addEventListener('click', function () {
       openDialogView(dialogView.dialog.id, 'train');
     });
-    el('chat-home2').addEventListener('click', function () { showScreen('dialogs'); });
+    el('chat-home2').addEventListener('click', goDialogsList);
   }
 }
 
-// ---------- РЕЖИМ «ПРОСЛУШАТЬ» ----------
+// ---------- РЕЖИМ «СЛУШАТЬ» ----------
 function startPlay() {
   const area = el('dialog-view-area');
   area.innerHTML =
@@ -320,14 +618,11 @@ function startPlay() {
     '<div class="chat-bar"><button id="chat-stop" class="btn-danger">Остановить</button></div>';
   dialogView.idx = 0;
   dialogView.playing = true;
-  el('chat-stop').addEventListener('click', function () {
-    stopPlay();
-    showScreen('dialogs');
-  });
+  el('chat-stop').addEventListener('click', goDialogsList);
   playStep();
 }
 
-// Полная остановка воспроизведения (вызывается и при смене экрана)
+// Полная остановка воспроизведения (вызывается и при уходе с экрана)
 function stopPlay() {
   if (dialogView) dialogView.playing = false;
   try { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); } catch (e) {}
@@ -339,7 +634,7 @@ function playStep() {
   if (dialogView.idx >= d.lines.length) { finishPlay(); return; }
   const line = d.lines[dialogView.idx];
 
-  // Сначала показываем индикатор «печатает…», потом пузырь
+  // Сначала индикатор «печатает…», потом пузырь
   const typing = document.createElement('div');
   typing.className = 'typing';
   typing.innerHTML = '<span></span><span></span><span></span>';
@@ -359,10 +654,10 @@ function playStep() {
 function finishPlay() {
   dialogView.playing = false;
   // Прослушанный до конца диалог — в статистику
-  const pr = db.progress.dialogs[dialogView.dialog.id] || { plays: 0, trains: 0, best: -1 };
-  pr.plays++;
-  db.progress.dialogs[dialogView.dialog.id] = pr;
-  saveDB();
+  const st = dialogStats(dialogView.dialog.id);
+  st.plays++;
+  dialogStore.stats[dialogView.dialog.id] = st;
+  saveDialogStore();
 
   const bar = el('chat-bar');
   if (!bar) return;
@@ -375,7 +670,7 @@ function finishPlay() {
   el('chat-train').addEventListener('click', function () {
     openDialogView(dialogView.dialog.id, 'train');
   });
-  el('chat-home').addEventListener('click', function () { showScreen('dialogs'); });
+  el('chat-home').addEventListener('click', goDialogsList);
 }
 
 // Озвучка реплики с уведомлением о завершении.
@@ -414,13 +709,12 @@ function startTrain() {
   d.lines.forEach(function (l, i) { if (l.who === 'me') meIdx.push(i); });
   if (!meIdx.length) {
     toast('В этом диалоге нет твоих реплик');
-    showScreen('dialogs');
+    goDialogsList();
     return;
   }
   dialogView.queue = shuffle(meIdx).map(function (i) { return { i: i, tries: 0 }; });
   dialogView.answered = 0;
   dialogView.correct = 0;
-  dialogView.total = meIdx.length;
 
   const area = el('dialog-view-area');
   area.innerHTML =
@@ -438,7 +732,7 @@ function updateTrainProgress() {
   }
 }
 
-// Варианты для твоей реплики: правильная + 3 похожие по длине из других диалогов.
+// Варианты твоей реплики: правильная + 3 случайные из других диалогов.
 // Если подходящих меньше трёх — тренировка пойдёт в формате самопроверки.
 function buildDialogOptions(line) {
   const correctKey = normalizeKey(line.es);
@@ -454,11 +748,7 @@ function buildDialogOptions(line) {
     });
   });
   if (uniq.length < 3) return [];
-  const scored = uniq.map(function (es) {
-    return { v: es, s: Math.random() * 0.9 + (Math.abs(es.length - line.es.length) <= 20 ? 1 : 0) };
-  });
-  scored.sort(function (a, b) { return b.s - a.s; });
-  return shuffle([line.es].concat(scored.slice(0, 3).map(function (x) { return x.v; })));
+  return shuffle([line.es].concat(shuffle(uniq).slice(0, 3)));
 }
 
 function trainStep() {
@@ -574,11 +864,11 @@ function finishDialogTrain() {
   const correct = dialogView.correct;
   const pct = answered ? Math.round(correct / answered * 100) : 0;
 
-  const pr = db.progress.dialogs[d.id] || { plays: 0, trains: 0, best: -1 };
-  pr.trains++;
-  if (pct > pr.best) pr.best = pct;
-  db.progress.dialogs[d.id] = pr;
-  saveDB();
+  const st = dialogStats(d.id);
+  st.trains++;
+  if (pct > st.best) st.best = pct;
+  dialogStore.stats[d.id] = st;
+  saveDialogStore();
   hapticSuccess();
 
   const feed = el('chat-feed');
@@ -592,7 +882,7 @@ function finishDialogTrain() {
   feed.appendChild(fin);
   el('chat-action').innerHTML = '';
   el('fin-again').addEventListener('click', function () { startTrain(); });
-  el('fin-home').addEventListener('click', function () { showScreen('dialogs'); });
+  el('fin-home').addEventListener('click', goDialogsList);
   scrollFeed();
 }
 
@@ -662,14 +952,13 @@ function saveDraftDialog() {
     msg.textContent = 'Диалог с таким названием уже есть.';
     return;
   }
-  ensureDialogState();
-  db.dialogs.push({
+  dialogStore.own.push({
     id: uid(), own: true, title: title,
     situation: el('dlg-new-situation').value.trim(),
     role: el('dlg-new-role').value.trim() || 'Собеседник',
     lines: draftLines.slice()
   });
-  saveDB();
+  saveDialogStore();
   draftLines = [];
   ['dlg-new-title', 'dlg-new-situation', 'dlg-new-role'].forEach(function (id) { el(id).value = ''; });
   renderDraft();
@@ -701,7 +990,6 @@ function importDialogs(text) {
     report.textContent = 'Нужен массив диалогов вида [{"title":"...","lines":[...]}].';
     return;
   }
-  ensureDialogState();
   const existing = {};
   allDialogs().forEach(function (d) { existing[normalizeKey(d.title)] = true; });
   let added = 0, skipped = 0;
@@ -728,7 +1016,7 @@ function importDialogs(text) {
     const key = normalizeKey(title);
     if (existing[key]) { skipped++; return; }
     existing[key] = true;
-    db.dialogs.push({
+    dialogStore.own.push({
       id: uid(), own: true, title: title,
       situation: typeof item.situation === 'string' ? item.situation.trim() : '',
       role: typeof item.role === 'string' ? item.role.trim() : 'Собеседник',
@@ -737,7 +1025,7 @@ function importDialogs(text) {
     added++;
   });
 
-  saveDB();
+  saveDialogStore();
   if (added) el('dlg-import-json').value = '';
   report.classList.add(added ? 'ok' : 'err');
   report.textContent = 'Добавлено диалогов: ' + added + '. Пропущено: ' + skipped + ' (дубликаты и битые записи).';
@@ -778,14 +1066,75 @@ function fallbackCopyDialog() {
   } catch (e) { return false; }
 }
 
+// ---------- БЭКАП ДИАЛОГОВ (свой, отдельный от бэкапа приложения) ----------
+function exportDialogs() {
+  try {
+    const blob = new Blob([JSON.stringify(dialogStore, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'spanish-dialogs-' + todayStr() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+    toast('Файл диалогов сохранён в загрузки');
+  } catch (e) {
+    toast('Не удалось создать файл диалогов');
+  }
+}
+
+function restoreDialogsFile() {
+  const input = el('dlg-backup-file');
+  const msg = el('dlg-restore-msg');
+  msg.className = 'form-msg';
+  const file = input.files && input.files[0];
+  if (!file) {
+    msg.classList.add('err');
+    msg.textContent = 'Сначала выбери файл диалогов.';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = function () {
+    try {
+      const data = JSON.parse(reader.result);
+      const own = Array.isArray(data) ? data : (data && Array.isArray(data.own) ? data.own : null);
+      if (!own) throw new Error('нет массива диалогов');
+      own.forEach(function (d) {
+        if (!d || typeof d.title !== 'string' || !Array.isArray(d.lines)) {
+          throw new Error('в файле битые диалоги');
+        }
+      });
+      tgConfirm('Заменить свои диалоги и их статистику содержимым файла?', function () {
+        dialogStore = {
+          own: own,
+          stats: (data && data.stats && typeof data.stats === 'object') ? data.stats : {}
+        };
+        saveDialogStore();
+        renderDialogsList();
+        msg.classList.add('ok');
+        msg.textContent = 'Диалоги восстановлены: ' + dialogStore.own.length + ' шт.';
+        toast('Диалоги восстановлены');
+      });
+    } catch (e) {
+      msg.classList.add('err');
+      msg.textContent = 'Файл не похож на бэкап диалогов (' + e.message + ').';
+    }
+    input.value = '';
+  };
+  reader.onerror = function () {
+    msg.classList.add('err');
+    msg.textContent = 'Не удалось прочитать файл.';
+  };
+  reader.readAsText(file);
+}
+
 // ---------- УДАЛЕНИЕ СВОЕГО ДИАЛОГА ----------
 function deleteOwnDialog(id) {
-  const d = (db.dialogs || []).find(function (x) { return x.id === id; });
+  const d = dialogStore.own.find(function (x) { return x.id === id; });
   if (!d) return;
   tgConfirm('Удалить диалог «' + d.title + '»?', function () {
-    db.dialogs = db.dialogs.filter(function (x) { return x.id !== id; });
-    delete db.progress.dialogs[id];
-    saveDB();
+    dialogStore.own = dialogStore.own.filter(function (x) { return x.id !== id; });
+    delete dialogStore.stats[id];
+    saveDialogStore();
     renderDialogsList();
     toast('Диалог удалён');
   });
@@ -793,8 +1142,19 @@ function deleteOwnDialog(id) {
 
 // ---------- Привязка кнопок и старт ----------
 function bindDialogs() {
+  // Дополнительные слушатели на вкладках: app.js навесил свои первым,
+  // эти сработают после них и навигации не мешают.
+  // Задача: остановить прослушивание при уходе с экрана диалога
+  // и перерисовать список при открытии вкладки «Диалоги».
+  document.querySelectorAll('.tab').forEach(function (t) {
+    t.addEventListener('click', function () {
+      stopPlay();
+      if (t.dataset.screen === 'dialogs') renderDialogsList();
+    });
+  });
+
   const back = el('btn-dlg-back');
-  if (back) back.addEventListener('click', function () { stopPlay(); showScreen('dialogs'); });
+  if (back) back.addEventListener('click', goDialogsList);
   const addBtn = el('btn-dlg-add-line');
   if (addBtn) addBtn.addEventListener('click', addLineToDraft);
   const saveBtn = el('btn-dlg-save');
@@ -803,6 +1163,10 @@ function bindDialogs() {
   if (impBtn) impBtn.addEventListener('click', function () { importDialogs(el('dlg-import-json').value); });
   const prBtn = el('btn-dlg-copy-prompt');
   if (prBtn) prBtn.addEventListener('click', copyDialogPrompt);
+  const expBtn = el('btn-dlg-export');
+  if (expBtn) expBtn.addEventListener('click', exportDialogs);
+  const resBtn = el('btn-dlg-restore');
+  if (resBtn) resBtn.addEventListener('click', restoreDialogsFile);
 
   // Переключатель «чья реплика» в форме создания
   document.querySelectorAll('#dlg-who-switch button').forEach(function (b) {
@@ -818,8 +1182,8 @@ function bindDialogs() {
 }
 
 // app.js инициализируется раньше (его скрипт подключён выше),
-// поэтому к этому моменту база уже загружена.
+// поэтому к этому моменту его утилиты уже определены.
 document.addEventListener('DOMContentLoaded', function () {
-  ensureDialogState();
+  loadDialogStore();
   bindDialogs();
 });
