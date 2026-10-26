@@ -21,14 +21,21 @@
         </div>
       </div>
       <div class="hero">
-        <h1>Испанский<br>каждый день</h1>
-        <p class="subtitle">Твой личный тренажёр слов</p>
+        <h1>Испанский<br><span class="grad">каждый день</span></h1>
+        <p class="subtitle">Тренажёр слов, глаголов, выражений и правил</p>
       </div>
       <div class="stat-grid">
         <div class="stat-card"><div class="stat-value" id="home-learned">0</div><div class="stat-label">выучено</div></div>
         <div class="stat-card"><div class="stat-value" id="home-queue">0</div><div class="stat-label">в очереди</div></div>
         <div class="stat-card"><div class="stat-value" id="home-streak">0</div><div class="stat-label">стрик, дней</div></div>
         <div class="stat-card"><div class="stat-value" id="home-accuracy">–</div><div class="stat-label">точность за неделю</div></div>
+      </div>
+      <div class="chip-row" id="type-chips">
+        <button class="chip active" data-type="all">Все</button>
+        <button class="chip" data-type="word">Слова</button>
+        <button class="chip" data-type="verb">Глаголы</button>
+        <button class="chip" data-type="phrase">Выражения</button>
+        <button class="chip" data-type="rule">Правила</button>
       </div>
       <button id="btn-start-train" class="btn-primary big">Начать тренировку</button>
       <p class="hint center" id="home-session-hint"></p>
@@ -41,6 +48,7 @@
         <button id="btn-exit-train" class="btn-ghost">Выход</button>
         <div id="train-progress" class="train-progress"></div>
       </div>
+      <div class="train-bar"><div id="train-bar-fill" class="train-bar-fill"></div></div>
       <div id="train-area"></div>
     </section>
 
@@ -54,36 +62,52 @@
       </div>
       <div class="card">
         <h3>Активность по дням</h3>
-        <canvas id="chart-activity" height="220"></canvas>
+        <!-- Фиксированный контейнер: без него Chart.js растягивает график бесконечно -->
+        <div class="chart-box" id="chart-activity-box">
+          <canvas id="chart-activity"></canvas>
+        </div>
         <div id="activity-empty" class="empty hidden">Пока нет данных за этот период</div>
       </div>
       <div class="card">
         <h3>Прогресс базы</h3>
-        <canvas id="chart-status" height="220"></canvas>
+        <div class="chart-box" id="chart-status-box">
+          <canvas id="chart-status"></canvas>
+        </div>
       </div>
       <div class="card">
-        <h3>Точность по режимам</h3>
+        <h3>По типам записей</h3>
+        <div id="types-grid" class="types-grid"></div>
+      </div>
+      <div class="card">
+        <h3>Точность по форматам</h3>
         <p class="hint">За выбранный период</p>
-        <div id="modes-accuracy"></div>
+        <div id="formats-accuracy"></div>
       </div>
       <div class="card">
-        <h3>Сложные слова</h3>
+        <h3>Сложные записи</h3>
         <p class="hint">Где ты чаще всего ошибаешься (за всё время)</p>
         <div id="worst-words"></div>
         <button id="btn-train-worst" class="btn-secondary hidden">Потренировать именно их</button>
+      </div>```html
       </div>
     </section>
 
     <!-- ===== ЭКРАН: СЛОВА ===== -->
     <section id="screen-words" class="screen hidden">
-      <h2>Мои слова</h2>
+      <h2>Мои записи</h2>
       <div class="card">
-        <h3>Добавить слово</h3>
-        <input id="add-es" placeholder="Испанское слово или выражение" maxlength="100">
+        <h3>Добавить запись</h3>
+        <div class="chip-row" id="add-type-chips">
+          <button class="chip active" data-type="word">Слово</button>
+          <button class="chip" data-type="verb">Глагол</button>
+          <button class="chip" data-type="phrase">Выражение</button>
+        </div>
+        <p class="hint" id="add-type-hint">Слово: отдельное существительное, прилагательное или наречие.</p>
+        <input id="add-es" placeholder="На испанском (глагол — в инфинитиве)" maxlength="100">
         <input id="add-ru" placeholder="Перевод на русский" maxlength="200">
         <input id="add-tr" placeholder="Транскрипция кириллицей (необязательно)" maxlength="100">
         <input id="add-ex" placeholder="Пример употребления (необязательно)" maxlength="200">
-        <button id="btn-add-word" class="btn-primary">Добавить слово</button>
+        <button id="btn-add-word" class="btn-primary">Добавить</button>
         <div id="add-msg" class="form-msg"></div>
       </div>
       <input id="word-search" placeholder="Поиск по списку...">
@@ -100,7 +124,7 @@
         <h3>Создать свой диалог</h3>
         <input id="dlg-new-title" placeholder="Название (например: В аптеке)" maxlength="60">
         <input id="dlg-new-situation" placeholder="Ситуация: кто с кем и о чём (необязательно)" maxlength="200">
-        <input id="dlg-new-role" placeholder="Кто собеседник (например: Фармацевт)" maxlength="40">
+        <input id="dlg-new-role" placeholder="Кто собеседник (например: Врач)" maxlength="40">
         <div class="segmented" id="dlg-who-switch">
           <button data-who="other" class="active">Реплика собеседника</button>
           <button data-who="me">Твоя реплика</button>
@@ -117,7 +141,7 @@
       <div class="card">
         <h3>Импорт диалогов из JSON</h3>
         <p class="hint">Вставь JSON-массив в формате: [{"title":"...","situation":"...","role":"...","lines":[{"who":"me","es":"...","ru":"...","tr":"..."}]}]. Дубликаты по названию и битые записи не добавятся.</p>
-        <textarea id="dlg-import-json" rows="7" placeholder='[{"title":"В аптеке","situation":"Ты покупаешь лекарство от головы.","role":"Фармацевт","lines":[{"who":"other","es":"Buenas, ¿qué le pasa?","ru":"Здравствуйте, что у вас?","tr":"буэнас, кэ лэ паса?"},{"who":"me","es":"Me duele la cabeza.","ru":"У меня болит голова.","tr":"мэ дуэлэ ла кабэса"}]}]'></textarea>
+        <textarea id="dlg-import-json" rows="7" placeholder='[{"title":"В аптеке","situation":"Ты покупаешь лекарство.","role":"Фармацевт","lines":[{"who":"other","es":"Buenas, ¿qué le pasa?","ru":"Здравствуйте, что у вас?","tr":"буэнас, кэ лэ паса?"},{"who":"me","es":"Me duele la cabeza.","ru":"У меня болит голова.","tr":"мэ дуэлэ ла кабэса"}]}]'></textarea>
         <button id="btn-dlg-import" class="btn-primary">Импортировать</button>
         <div id="dlg-import-report" class="form-msg"></div>
       </div>
@@ -126,6 +150,16 @@
         <h3>Диалог через ИИ-чат</h3>
         <p class="hint">Нажми кнопку — в буфер скопируется готовый промт. Вставь его в любой ИИ-чат, а сразу после него — тему (например, «в аптеке») или свой текст диалога. Полученный JSON верни в поле импорта выше.</p>
         <button id="btn-dlg-copy-prompt" class="btn-secondary">Скопировать промт для ИИ</button>
+      </div>
+
+      <div class="card">
+        <h3>Бэкап диалогов</h3>
+        <button id="btn-dlg-export" class="btn-primary">Экспортировать диалоги</button>
+        <p class="hint">Файл сохранится в загрузки. Свои диалоги хранятся отдельно от основной базы — у них свой бэкап.</p>
+        <p class="hint"><b>Восстановление:</b> выбери файл диалогов и нажми кнопку.</p>
+        <input type="file" id="dlg-backup-file" accept=".json,application/json">
+        <button id="btn-dlg-restore" class="btn-danger">Восстановить из файла</button>
+        <div id="dlg-restore-msg" class="form-msg"></div>
       </div>
     </section>
 
@@ -142,21 +176,21 @@
     <section id="screen-import" class="screen hidden">
       <h2>Импорт и бэкап</h2>
       <div class="card">
-        <h3>Импорт слов из JSON</h3>
-        <p class="hint">Вставь JSON в формате приложения: массив записей с полями es, ru, tr, ex. Дубликаты и битые записи не добавятся.</p>
-        <textarea id="import-json" rows="7" placeholder='[{"es":"hola","ru":"привет","tr":"ола","ex":"Hola, ¿qué tal?"}]'></textarea>
+        <h3>Импорт записей из JSON</h3>
+        <p class="hint">Вставь JSON-массив в формате приложения: у каждой записи поля es, ru, tr, ex, exRu, type, priority; для глаголов — forms; для правил — ruleText и ruleQuestions. Дубликаты по полю es и битые записи не добавятся.</p>
+        <textarea id="import-json" rows="7" placeholder='[{"es":"casa","ru":"дом","tr":"коса","ex":"Mi casa es pequeña.","exRu":"Мой дом маленький.","type":"word","priority":9}]'></textarea>
         <button id="btn-import" class="btn-primary">Импортировать</button>
         <div id="import-report" class="form-msg"></div>
       </div>
       <div class="card">
         <h3>Импорт через ИИ-чат</h3>
-        <p class="hint">Нажми кнопку — в буфер скопируется готовый промт. Вставь его в любой ИИ-чат вместе со своим сырым списком слов, получи в ответ JSON и вернись в поле выше.</p>
+        <p class="hint">Нажми кнопку — в буфер скопируется готовый промт. Вставь его в любой ИИ-чат вместе со своим сырым списком, получи в ответ JSON и вернись в поле выше.</p>
         <button id="btn-copy-prompt" class="btn-secondary">Скопировать промт для ИИ</button>
       </div>
       <div class="card">
         <h3>Бэкап</h3>
         <button id="btn-export" class="btn-primary">Экспортировать всё (бэкап)</button>
-        <p class="hint">Файл сохранится в загрузки. В бэкап входят и слова, и диалоги, и весь прогресс.</p>
+        <p class="hint">Файл сохранится в загрузки. Храни его в надёжном месте.</p>
         <p class="hint"><b>Восстановление:</b> выбери файл бэкапа и нажми кнопку.</p>
         <input type="file" id="import-backup-file" accept=".json,application/json">
         <button id="btn-restore" class="btn-danger">Восстановить из файла</button>
@@ -177,6 +211,32 @@
         <button id="btn-save-settings" class="btn-primary">Сохранить</button>
         <button id="btn-test" class="btn-secondary">Проверить связь</button>
         <div id="settings-msg" class="form-msg"></div>
+      </div>
+      <div class="card">
+        <h3>Размер тренировки</h3>
+        <p class="hint">Сколько карточек в одной сессии (без учёта повторов).</p>
+        <div class="segmented" id="size-chips">
+          <button data-size="10">10</button>
+          <button data-size="20">20</button>
+          <button data-size="30">30</button>
+          <button data-size="40">40</button>
+          <button data-size="50">50</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Новых записей за тренировку</h3>
+        <p class="hint">Сколько новых слов максимум попадает в одну сессию.</p>
+        <div class="segmented" id="newlimit-chips">
+          <button data-limit="3">3</button>
+          <button data-limit="5" class="active">5</button>
+          <button data-limit="8">8</button>
+          <button data-limit="10">10</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Сброс</h3>
+        <p class="hint">Все записи станут новыми, стрик, история и статистика обнулятся. Сам словарь и настройки бота сохранятся. Отменить нельзя — сначала сделай экспорт, если бэкап нужен.</p>
+        <button id="btn-reset-progress" class="btn-danger">Сбросить прогресс и статистику</button>
       </div>
       <div class="card">
         <h3>Важно про данные</h3>
