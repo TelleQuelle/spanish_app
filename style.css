@@ -1,18 +1,16 @@
 /* ===== Переменные темы (тёмная по умолчанию; в Telegram светлая тема подменяется из JS) ===== */
 :root {
-  --bg: #0A0C12;
-  --card: #141826;
-  --card-2: #0F1320;
-  --text: #EEF1FA;
-  --muted: #8C93AD;
-  --accent: #8A7CFF;
-  --accent-2: #5ED3F3;
-  --accent-ink: #0B0A1A;
+  --bg: #0E1116;
+  --card: #171C24;
+  --card-2: #10141A;
+  --text: #EAF0F6;
+  --muted: #8B96A6;
+  --accent: #A3E635;
+  --accent-ink: #14190A;
   --ok: #4ADE80;
-  --err: #FF6B7D;
-  --warn: #F5C15C;
-  --line: rgba(255, 255, 255, 0.08);
-  --radius: 20px;
+  --err: #FF6B6B;
+  --line: rgba(255, 255, 255, 0.07);
+  --radius: 18px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -30,26 +28,13 @@ html, body {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
-  /* Отступ сверху с учётом «вырезов» телефона (чёлка, статус-бар) */
-  padding: calc(env(safe-area-inset-top, 0px) + 16px) 16px 100px;
+  padding: 16px 16px 96px;
   overflow-x: hidden;
-}
-
-/* В Telegram контент уходит под системную шапку («Закрыть», статус-бар) —
-   добавляем запас сверху. Класс ставит app.js только внутри Telegram. */
-body.in-telegram #app {
-  padding-top: calc(env(safe-area-inset-top, 0px) + 60px);
 }
 
 .hidden { display: none !important; }
 
-h1 { font-size: 32px; font-weight: 800; line-height: 1.12; letter-spacing: -0.6px; }
-h1 .grad {
-  background: linear-gradient(92deg, var(--accent) 10%, var(--accent-2) 90%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-}
+h1 { font-size: 30px; font-weight: 800; line-height: 1.15; letter-spacing: -0.5px; }
 h2 { font-size: 24px; font-weight: 800; margin-bottom: 14px; letter-spacing: -0.3px; }
 h3 { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
 
@@ -57,23 +42,15 @@ h3 { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
 .hint.center { text-align: center; }
 .empty { color: var(--muted); font-size: 14px; text-align: center; padding: 18px 0; }
 
-/* ===== Контейнер графиков: жёсткая высота обязательно,
-   иначе Chart.js растягивает график в бесконечную высоту ===== */
-.chart-box {
-  position: relative;
-  height: 220px;
-  width: 100%;
-}
-
 /* ===== Главная ===== */
-.hero { padding: 28px 4px 20px; }
-.subtitle { color: var(--muted); margin-top: 8px; font-size: 15px; }
+.hero { padding: 26px 4px 22px; }
+.subtitle { color: var(--muted); margin-top: 6px; font-size: 15px; }
 
 .stat-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 .stat-card {
   background: var(--card);
@@ -83,28 +60,6 @@ h3 { font-size: 17px; font-weight: 700; margin-bottom: 10px; }
 }
 .stat-value { font-size: 28px; font-weight: 800; color: var(--accent); }
 .stat-label { color: var(--muted); font-size: 12px; margin-top: 2px; }
-
-/* ===== Чипы выбора типа ===== */
-.chip-row {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-.chip {
-  background: var(--card);
-  color: var(--muted);
-  border: 1px solid var(--line);
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 700;
-  border-radius: 999px;
-}
-.chip.active {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-color: var(--accent);
-}
 
 /* ===== Баннер экспорта ===== */
 .banner {
@@ -140,7 +95,7 @@ button:active { transform: scale(0.97); }
   font-size: 16px;
   font-weight: 700;
 }
-.btn-primary.big { padding: 18px 18px; font-size: 17px; border-radius: 22px; }
+.btn-primary.big { padding: 18px 18px; font-size: 17px; border-radius: 20px; }
 .btn-secondary {
   display: block;
   width: 100%;
@@ -152,16 +107,10 @@ button:active { transform: scale(0.97); }
 .btn-danger {
   display: block;
   width: 100%;
-  background: rgba(255, 107, 125, 0.12);
+  background: rgba(255, 107, 107, 0.12);
   color: var(--err);
-  border: 1px solid rgba(255, 107, 125, 0.35);
+  border: 1px solid rgba(255, 107, 107, 0.35);
   padding: 13px 18px;
-}
-.btn-dontknow {
-  background: var(--card);
-  color: var(--err);
-  border: 1px solid rgba(255, 107, 125, 0.35);
-  padding: 13px 12px;
 }
 .btn-ghost {
   background: transparent;
@@ -170,38 +119,19 @@ button:active { transform: scale(0.97); }
   font-size: 14px;
 }
 
-/* Ряд из двух кнопок одинаковой ширины («Открыть букву» / «Не знаю») */
-.input-row { display: flex; gap: 10px; }
-.input-row button { flex: 1; }
-
 /* ===== Тренировка ===== */
 .train-top {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 12px;
 }
 .train-progress { color: var(--muted); font-size: 13px; }
-
-.train-bar {
-  height: 6px;
-  background: var(--card-2);
-  border-radius: 4px;
-  overflow: hidden;
-  margin-bottom: 16px;
-}
-.train-bar-fill {
-  height: 100%;
-  width: 0;
-  background: linear-gradient(90deg, var(--accent), var(--accent-2));
-  border-radius: 4px;
-  transition: width 0.25s ease;
-}
 
 .word-card {
   background: var(--card);
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 22px;
   padding: 30px 20px 26px;
   text-align: center;
   margin-bottom: 14px;
@@ -209,29 +139,6 @@ button:active { transform: scale(0.97); }
 .word-mode { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 14px; }
 .word-front { font-size: 32px; font-weight: 800; line-height: 1.2; word-break: break-word; }
 .word-tr { color: var(--muted); font-size: 15px; margin-top: 8px; }
-.word-sub { color: var(--muted); font-size: 15px; margin-top: 10px; }
-
-.rule-text {
-  text-align: left;
-  font-size: 15px;
-  line-height: 1.5;
-  background: var(--card-2);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  padding: 14px;
-  margin-top: 12px;
-  white-space: pre-line;
-}
-
-/* Вопрос внутри карточки теории правила */
-.rule-question {
-  text-align: left;
-  font-size: 16px;
-  font-weight: 700;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px solid var(--line);
-}
 
 .speak-btn {
   margin: 14px auto 0;
@@ -260,71 +167,6 @@ button:active { transform: scale(0.97); }
 }
 .option:active { border-color: var(--accent); }
 
-/* ===== Сборка фразы (плитки) ===== */
-.build-slots {
-  min-height: 54px;
-  background: var(--card-2);
-  border: 1px dashed var(--line);
-  border-radius: 14px;
-  padding: 8px;
-  margin-bottom: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.build-slots .slot-empty { color: var(--muted); font-size: 13px; align-self: center; padding: 6px; }
-.build-tokens { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-.tile {
-  background: var(--card);
-  color: var(--text);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px 14px;
-  font-size: 15px;
-  font-weight: 600;
-}
-.tile.used { opacity: 0.25; pointer-events: none; }
-.tile-in-slot {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border-radius: 10px;
-  padding: 6px 10px;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-/* ===== Таблица форм глагола ===== */
-.forms-table {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-top: 12px;
-  text-align: left;
-}
-.forms-cell {
-  background: var(--card-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 14px;
-}
-.forms-cell b { color: var(--accent); font-weight: 700; margin-right: 6px; }
-
-/* ===== Подсказка (открытые буквы) ===== */
-.hint-line {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 18px;
-  letter-spacing: 3px;
-  color: var(--warn);
-  background: var(--card-2);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 10px 14px;
-  margin-bottom: 10px;
-  min-height: 20px;
-  word-break: break-all;
-}
-
 /* ===== Фидбек ===== */
 .feedback {
   border-radius: var(--radius);
@@ -338,19 +180,9 @@ button:active { transform: scale(0.97); }
 .fb-title { font-weight: 800; font-size: 17px; margin-bottom: 6px; }
 .feedback.ok .fb-title { color: var(--ok); }
 .feedback.err .fb-title { color: var(--err); }
-.fb-hinted { color: var(--warn); font-size: 13px; margin-bottom: 6px; }
 .fb-answer { font-size: 16px; font-weight: 700; }
 .fb-tr { color: var(--muted); font-size: 14px; margin-top: 4px; }
 .fb-ex { color: var(--muted); font-size: 14px; margin-top: 8px; font-style: italic; }
-.fb-order {
-  margin-top: 10px;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--card-2);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  padding: 10px 12px;
-}
 .feedback .btn-primary { margin-top: 14px; }
 
 #input-form { display: flex; flex-direction: column; gap: 10px; }
@@ -391,7 +223,7 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
 .form-msg.ok { color: var(--ok); }
 .form-msg.err { color: var(--err); }
 
-/* ===== Переключатели (период, размер, лимит) ===== */
+/* ===== Переключатель периода ===== */
 .segmented {
   display: flex;
   gap: 4px;
@@ -411,29 +243,12 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
 }
 .segmented button.active { background: var(--accent); color: var(--accent-ink); }
 
-/* ===== Карточки по типам ===== */
-.types-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.type-card {
-  background: var(--card-2);
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 12px;
-}
-.type-card-title { font-weight: 800; font-size: 14px; margin-bottom: 8px; }
-.type-card-line { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-top: 3px; }
-.type-card-line span:last-child { color: var(--text); font-weight: 600; }
-.type-card-acc { margin-top: 8px; font-size: 13px; color: var(--accent); font-weight: 700; }
-
-/* ===== Точность по форматам ===== */
-.fmt-row { margin-bottom: 12px; }
-.fmt-row-top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; gap: 8px; }
-.fmt-row-top span:last-child { color: var(--muted); white-space: nowrap; }
-.fmt-bar { height: 8px; background: var(--card-2); border-radius: 6px; overflow: hidden; }
-.fmt-bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); border-radius: 6px; }
+/* ===== Точность по режимам ===== */
+.mode-row { margin-bottom: 12px; }
+.mode-row-top { display: flex; justify-content: space-between; font-size: 14px; margin-bottom: 5px; }
+.mode-row-top span:last-child { color: var(--muted); }
+.mode-bar { height: 8px; background: var(--card-2); border-radius: 6px; overflow: hidden; }
+.mode-bar-fill { height: 100%; background: var(--accent); border-radius: 6px; }
 
 /* ===== Список слов ===== */
 .word-row {
@@ -458,7 +273,6 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
   background: var(--card-2);
   color: var(--muted);
 }
-.badge.type { color: var(--accent-2); }
 .badge.learning { color: var(--accent); }
 .badge.learned { color: var(--ok); }
 .word-del {
@@ -478,7 +292,184 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
 .worst-ru { color: var(--muted); font-size: 13px; }
 .worst-num { color: var(--err); white-space: nowrap; font-size: 13px; }
 
-/* ===== Нижняя навигация ===== */
+/* ============================================================
+   РЕЖИМ «ДИАЛОГИ»
+   ============================================================ */
+
+/* Карточка диалога в списке */
+.dialog-card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 12px;
+}
+.dlg-top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.dlg-title { font-size: 18px; font-weight: 800; }
+.dlg-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 8px;
+  background: var(--card-2);
+  color: var(--accent);
+}
+.dlg-situation { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.dlg-meta { color: var(--muted); font-size: 12px; margin-top: 8px; }
+.dlg-best { margin-top: 8px; height: 6px; background: var(--card-2); border-radius: 6px; overflow: hidden; }
+.dlg-best-fill { height: 100%; background: var(--accent); border-radius: 6px; }
+
+.dlg-actions { display: flex; gap: 8px; margin-top: 12px; }
+.dlg-actions button { flex: 1; padding: 11px 6px; font-size: 13px; border-radius: 12px; }
+.dlg-btn-read { background: var(--card-2); color: var(--text); border: 1px solid var(--line); }
+.dlg-btn-play { background: var(--card-2); color: var(--text); border: 1px solid var(--line); }
+.dlg-btn-train { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.dlg-del {
+  flex-shrink: 0;
+  width: 38px;
+  background: var(--card-2);
+  color: var(--muted);
+  font-size: 18px;
+  border: 1px solid var(--line);
+}
+.dlg-del:active { color: var(--err); }
+
+/* Лента чата */
+.chat-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  min-height: 180px;
+}
+.chat-progress { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+
+/* Пузыри реплик */
+.bubble {
+  max-width: 88%;
+  padding: 10px 14px;
+  border-radius: 16px;
+  font-size: 15px;
+  line-height: 1.4;
+  animation: pop 0.18s ease;
+  word-break: break-word;
+}
+.bubble.other {
+  align-self: flex-start;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 6px;
+}
+.bubble.me {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-bottom-right-radius: 6px;
+}
+.bubble.fix { border: 1px solid var(--err); }
+.b-es { font-size: 15px; font-weight: 700; }
+.bubble.me .b-es { font-weight: 800; }
+.b-tr { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+.b-ru { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+.b-note { font-size: 12px; margin-top: 4px; font-weight: 700; color: rgba(0, 0, 0, 0.65); }
+.b-speak {
+  margin-top: 6px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+}
+.bubble.other .b-speak { background: var(--card-2); color: var(--accent); }
+.bubble.me .b-speak { background: rgba(0, 0, 0, 0.15); color: var(--accent-ink); }
+
+.role-label {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 4px 0;
+  align-self: flex-start;
+}
+
+/* Индикатор «печатает…» */
+.typing {
+  align-self: flex-start;
+  display: flex;
+  gap: 4px;
+  padding: 12px 16px;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  border-bottom-left-radius: 6px;
+}
+.typing span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: blink 1s infinite;
+}
+.typing span:nth-child(2) { animation-delay: 0.2s; }
+.typing span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.25; }
+  40% { opacity: 1; }
+}
+
+/* Карточка задания в тренировке */
+.chat-task {
+  background: var(--card);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px;
+  text-align: center;
+  width: 100%;
+}
+.fix-note {
+  align-self: flex-end;
+  font-size: 12px;
+  color: var(--err);
+  text-align: right;
+  max-width: 88%;
+}
+
+/* Нижняя панель действий в диалоге */
+.chat-bar { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.chat-bar-row { display: flex; gap: 8px; }
+.chat-bar-row button { flex: 1; }
+
+/* Черновик создаваемого диалога */
+.draft-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-top: 6px;
+  font-size: 13px;
+}
+.draft-who { color: var(--accent); font-weight: 700; flex-shrink: 0; font-size: 11px; }
+.draft-del {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  border: 1px solid var(--line);
+}
+.draft-del:active { color: var(--err); }
+
+/* ===== Нижняя навигация (7 вкладок — шрифт мельче) ===== */
 .tabbar {
   position: fixed;
   bottom: 0;
@@ -497,7 +488,7 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
   flex: 1;
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   padding: 8px 2px;
   border-radius: 10px;
