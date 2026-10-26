@@ -479,7 +479,7 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
 .worst-num { color: var(--err); white-space: nowrap; font-size: 13px; }
 
 /* ============================================================
-   РЕЖИМ «ДИАЛОГИ» — оформлен в стиле темы приложения:
+   РЕЖИМ «ДИАЛОГИ» — в стиле темы приложения:
    фиолетовые пузыри «твоих» реплик, тёмные — собеседника
    ============================================================ */
 
@@ -614,13 +614,6 @@ label { display: block; color: var(--muted); font-size: 13px; margin: 8px 0 6px;
   padding: 14px;
   text-align: center;
   width: 100%;
-}
-.fix-note {
-  align-self: flex-end;
-  font-size: 12px;
-  color: var(--err);
-  text-align: right;
-  max-width: 88%;
 }
 
 /* Нижняя панель действий в диалоге */
