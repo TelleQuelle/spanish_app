@@ -1,16 +1,20 @@
 'use strict';
 /* ============================================================
-   РЕЖИМ «ДИАЛОГИ» — версия 2 (под версию 4 приложения)
+   РЕЖИМ «ДИАЛОГИ» — версия 3 (микс-формат тренировки)
    Полностью автономен: app.js и words.js не меняются.
    Свои диалоги и статистика хранятся в ОТДЕЛЬНОМ ключе
    localStorage (spanishDialogs.v1), поэтому сброс прогресса
    и бэкап приложения на них не влияют.
-   Использует из app.js: el, esc, shuffle, normalizeKey, toast,
-   speak, uid, todayStr, tgConfirm, hapticLight, hapticSuccess,
-   hapticError, showScreen, SPEAK_ICON.
-   Три режима: «Читать», «Прослушать», «Тренировать».
-   Плюс создание своих диалогов, импорт JSON, промт для ИИ
-   и отдельный бэкап диалогов.
+   Использует из app.js: el, esc, shuffle, normalizeKey,
+   normalizeAnswer, toast, speak, uid, todayStr, tgConfirm,
+   hapticLight, hapticSuccess, hapticError, showScreen,
+   SPEAK_ICON, db.
+   Форматы тренировки (чередуются по кругу):
+   choice  — выбери реплику (близкие дистракторы),
+   build   — собери реплику из плиток,
+   input   — впиши реплику,
+   gap     — дополни реплику (пропуск слова),
+   recall  — самопроверка (запасной формат).
    ============================================================ */
 
 // ============================================================
@@ -124,7 +128,7 @@ const DIALOG_SET = [
       { who: 'other', es: 'Anna, ¿es grande tu familia?', ru: 'Аня, твоя семья большая?', tr: 'анна, эс грандэ ту фамилиа?' },
       { who: 'me', es: 'Sí, mi familia es grande.', ru: 'Да, моя семья большая.', tr: 'си, ми фамилиа эс грандэ' },
       { who: 'other', es: '¿Quién trabaja?', ru: 'Кто работает?', tr: 'кьен трабаха?' },
-      { who: 'me', es: 'Mi padre y mi madre. Mi padre es abogado.', ru: 'Папа и мама. Папа адвокат.', tr: 'ми падрэ и ми мадрэ. ми падрэ эс abogado' },
+      { who: 'me', es: 'Mi padre y mi madre. Mi padre es abogado.', ru: 'Папа и мама. Папа адвокат.', tr: 'ми падрэ и ми мадрэ. ми падрэ эс абогадо' },
       { who: 'other', es: '¿Y tu madre?', ru: 'А мама?', tr: 'и ту мадрэ?' },
       { who: 'me', es: 'Es maestra. Trabaja en una escuela.', ru: 'Она учительница. Работает в школе.', tr: 'эс маэстра. трабаха эн уна эскуэла' },
       { who: 'other', es: '¿Y tu novio?', ru: 'А твой парень?', tr: 'и ту новьо?' },
@@ -515,7 +519,7 @@ function openDialogView(id, mode) {
   stopPlay();
   dialogView = {
     dialog: d, mode: mode, idx: 0, playing: false,
-    queue: [], answered: 0, correct: 0
+    queue: [], answered: 0, correct: 0, step: 0
   };
   el('dlg-view-title').textContent = d.title;
   showScreen('dialog-view');
@@ -529,9 +533,21 @@ function openDialogView(id, mode) {
 }
 
 // ---------- Общие элементы чата ----------
+// Прокрутка к последнему элементу чата (НЕ всего документа —
+// раньше прокрутка к низу документа уводила контент из виду).
+function scrollToNode(node) {
+  if (!node) return;
+  try { node.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); }
+  catch (e) { try { node.scrollIntoView(false); } catch (e2) {} }
+}
+
 function scrollFeed() {
-  try { window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' }); }
-  catch (e) { window.scrollTo(0, document.body.scrollHeight); }
+  const feed = el('chat-feed');
+  if (!feed) return;
+  const action = el('chat-action');
+  const target = (action && action.lastElementChild) ? action.lastElementChild
+    : (feed.lastElementChild || feed);
+  scrollToNode(target);
 }
 
 function appendRoleLabel(role) {
@@ -543,14 +559,14 @@ function appendRoleLabel(role) {
   feed.appendChild(lab);
 }
 
-// HTML пузыря. opts.tr === false — без транскрипции
+// HTML пузыря. opts.tr === false — без транскрипции, opts.ru === false — без перевода
 function bubbleHTML(line, opts) {
   opts = opts || {};
   const me = line.who === 'me';
   let html = '<div class="bubble ' + (me ? 'me' : 'other') + '">' +
     '<div class="b-es">' + esc(line.es) + '</div>';
   if (opts.tr !== false && line.tr) html += '<div class="b-tr">' + esc(line.tr) + '</div>';
-  html += '<div class="b-ru">' + esc(line.ru) + '</div>';
+  if (opts.ru !== false) html += '<div class="b-ru">' + esc(line.ru) + '</div>';
   html += '<button class="b-speak" aria-label="Озвучить">' + SPEAK_ICON + '</button></div>';
   return html;
 }
@@ -702,7 +718,19 @@ function speakLine(text, onDone) {
   }
 }
 
-// ---------- РЕЖИМ «ТРЕНИРОВАТЬ» ----------
+// ============================================================
+// РЕЖИМ «ТРЕНИРОВАТЬ» — МИКС ФОРМАТОВ
+// ============================================================
+
+const DIALOG_FORMATS = ['choice', 'build', 'input', 'gap'];
+const DIALOG_FORMAT_LABELS = {
+  choice: 'выбери реплику',
+  build: 'собери реплику',
+  input: 'впиши реплику',
+  gap: 'дополни реплику',
+  recall: 'вспомни реплику'
+};
+
 function startTrain() {
   const d = dialogView.dialog;
   const meIdx = [];
@@ -715,6 +743,7 @@ function startTrain() {
   dialogView.queue = shuffle(meIdx).map(function (i) { return { i: i, tries: 0 }; });
   dialogView.answered = 0;
   dialogView.correct = 0;
+  dialogView.step = 0; // счётчик показов — для чередования форматов
 
   const area = el('dialog-view-area');
   area.innerHTML =
@@ -732,25 +761,211 @@ function updateTrainProgress() {
   }
 }
 
-// Варианты твоей реплики: правильная + 3 случайные из других диалогов.
-// Если подходящих меньше трёх — тренировка пойдёт в формате самопроверки.
-function buildDialogOptions(line) {
-  const correctKey = normalizeKey(line.es);
-  const seen = {};
-  const uniq = [];
-  allDialogs().forEach(function (d) {
-    (d.lines || []).forEach(function (l) {
-      if (l.who !== 'me') return;
-      const k = normalizeKey(l.es);
-      if (k === correctKey || seen[k]) return;
-      seen[k] = true;
-      uniq.push(l.es);
-    });
-  });
-  if (uniq.length < 3) return [];
-  return shuffle([line.es].concat(shuffle(uniq).slice(0, 3)));
+// ---------- Токены и банки замен ----------
+// Разбивка реплики на «сырые» токены по пробелам
+function dlgTokens(es) {
+  return String(es).trim().split(/\s+/).filter(Boolean);
 }
 
+// Токен → префикс (знаки до слова), ядро (само слово), хвост (знаки после)
+function splitToken(t) {
+  const m = String(t).match(/^([^A-Za-zÁÉÍÓÚÜÑáéíóúüñ]*)([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)(.*)$/);
+  if (!m) return null;
+  return { pre: m[1], core: m[2], post: m[3] };
+}
+
+// Нормализация токена для сравнения порядка в сборке фразы
+function dlgNormToken(t) { return normalizeAnswer(t); }
+
+// Банк глагольных форм: строится из базы приложения (у глаголов есть forms).
+// Ключ — форма в нижнем регистре, значение — остальные формы того же глагола.
+let VERB_BANK_CACHE = null;
+function verbBank() {
+  if (VERB_BANK_CACHE) return VERB_BANK_CACHE;
+  const bank = {};
+  function addForms(forms) {
+    const vals = [];
+    ['yo', 'tu', 'el', 'nosotros', 'vosotros', 'ellos'].forEach(function (k) {
+      if (forms[k]) vals.push(String(forms[k]).toLowerCase());
+    });
+    vals.forEach(function (f) {
+      if (!bank[f]) bank[f] = [];
+      vals.forEach(function (g) {
+        if (g !== f && bank[f].indexOf(g) === -1) bank[f].push(g);
+      });
+    });
+  }
+  try {
+    (db && db.words ? db.words : []).forEach(function (w) {
+      if (w.type === 'verb' && w.forms) addForms(w.forms);
+    });
+    // Формы глаголов, которых нет в базе, но они встречаются в репликах
+    EXTRA_FORMS.forEach(addForms);
+  } catch (e) { /* базы нет — банк пустой, работают статические пары */ }
+  VERB_BANK_CACHE = bank;
+  return bank;
+}
+
+// Глаголы вне стартовой базы, чьи формы встречаются в репликах диалогов
+const EXTRA_FORMS = [
+  { yo: 'tengo', tu: 'tienes', el: 'tiene', nosotros: 'tenemos', vosotros: 'tenéis', ellos: 'tienen' },
+  { yo: 'quiero', tu: 'quieres', el: 'quiere', nosotros: 'queremos', vosotros: 'queréis', ellos: 'quieren' },
+  { yo: 'puedo', tu: 'puedes', el: 'puede', nosotros: 'podemos', vosotros: 'podéis', ellos: 'pueden' },
+  { yo: 'voy', tu: 'vas', el: 'va', nosotros: 'vamos', vosotros: 'vais', ellos: 'van' },
+  { yo: 'llego', tu: 'llegas', el: 'llega', nosotros: 'llegamos', vosotros: 'llegáis', ellos: 'llegan' }
+];
+
+// Статические пары близких слов из словаря приложения
+const WORD_BANK = {
+  'mucho': ['poco'], 'poco': ['mucho'],
+  'bien': ['mal'], 'mal': ['bien'],
+  'muy': ['bastante'], 'bastante': ['muy'],
+  'grande': ['pequeño'], 'pequeño': ['grande'],
+  'bueno': ['malo'], 'malo': ['bueno'],
+  'caro': ['barato'], 'barato': ['caro'],
+  'nuevo': ['viejo'], 'viejo': ['nuevo', 'joven'],
+  'joven': ['viejo'],
+  'alegre': ['triste'], 'triste': ['alegre', 'feliz'], 'feliz': ['triste'],
+  'bonito': ['feo', 'hermoso'], 'hermoso': ['bonito', 'feo'], 'feo': ['bonito', 'hermoso'],
+  'fácil': ['difícil'], 'difícil': ['fácil'],
+  'interesante': ['aburrido'], 'aburrido': ['interesante'],
+  'divertido': ['aburrido'],
+  'español': ['francés', 'ruso'], 'francés': ['español', 'ruso'], 'ruso': ['español', 'francés'],
+  'española': ['rusa', 'francesa'], 'rusa': ['española', 'francesa'],
+  'hoy': ['mañana'], 'mañana': ['hoy'],
+  'día': ['noche'], 'noche': ['día'],
+  'sí': ['no'], 'no': ['sí'],
+  'mi': ['tu'], 'tu': ['mi'], 'mis': ['tus'], 'tus': ['mis'],
+  'padre': ['madre'], 'madre': ['padre'],
+  'hermano': ['hermana'], 'hermana': ['hermano'],
+  'abuelo': ['abuela'], 'abuela': ['abuelo'],
+  'amigo': ['novio'], 'amiga': ['novio'], 'novio': ['amigo'],
+  'chica': ['niña', 'chaval'], 'niña': ['chica'], 'chaval': ['chica'],
+  'hombre': ['mujer'], 'mujer': ['hombre'],
+  'café': ['agua'], 'agua': ['café'],
+  'libro': ['página'], 'página': ['libro'],
+  'casa': ['escuela', 'hospital', 'teatro'],
+  'escuela': ['casa', 'universidad'], 'universidad': ['escuela'],
+  'hospital': ['escuela', 'casa'],
+  'teatro': ['parque'], 'parque': ['teatro'],
+  'ciudad': ['mapa'], 'mapa': ['ciudad'],
+  'coche': ['avión'], 'avión': ['coche'],
+  'trabajo': ['clase'], 'clase': ['trabajo'],
+  'profesor': ['maestro'], 'maestro': ['profesor'],
+  'médico': ['cirujano'], 'cirujano': ['médico'],
+  'estudiante': ['alumno'], 'alumno': ['estudiante'],
+  'periodista': ['escritor'], 'escritor': ['periodista'],
+  'pintor': ['pianista'], 'pianista': ['pintor'],
+  'ingeniero': ['arquitecto'], 'arquitecto': ['ingeniero'],
+  'abogado': ['secretario'], 'secretario': ['abogado'],
+  'camarero': ['empleado'], 'empleado': ['camarero'],
+  'historia': ['tema'], 'tema': ['historia'],
+  'idioma': ['tema'], 'cosa': ['problema'], 'problema': ['cosa'],
+  'caso': ['problema'], 'vida': ['clima'], 'clima': ['vida'],
+  'mano': ['lápiz'], 'lápiz': ['mano'], 'radio': ['teléfono']
+};
+
+// Все близкие замены для слова: формы глаголов + статические пары
+function replacementsFor(coreLower) {
+  const out = [];
+  const vb = verbBank();
+  if (vb[coreLower]) {
+    vb[coreLower].forEach(function (r) { if (out.indexOf(r) === -1) out.push(r); });
+  }
+  if (WORD_BANK[coreLower]) {
+    WORD_BANK[coreLower].forEach(function (r) { if (out.indexOf(r) === -1) out.push(r); });
+  }
+  return out;
+}
+
+// Замена одного токена в реплике (регистр и знаки вокруг сохраняются)
+function applyReplacement(tokens, idx, rep) {
+  const sp = splitToken(tokens[idx]);
+  if (!sp) return tokens.join(' ');
+  let word = rep;
+  const first = sp.core.charAt(0);
+  if (first !== first.toLowerCase()) {
+    word = word.charAt(0).toUpperCase() + word.slice(1);
+  }
+  const arr = tokens.slice();
+  arr[idx] = sp.pre + word + sp.post;
+  return arr.join(' ');
+}
+
+// Близкие дистракторы для выбора: 3 варианта, каждый — замена ОДНОГО
+// слова правильной реплики на близкое (форма глагола / парное слово).
+function buildCloseDistractions(line) {
+  const tokens = dlgTokens(line.es);
+  const cands = []; // { idx, rep }
+  tokens.forEach(function (t, idx) {
+    const sp = splitToken(t);
+    if (!sp) return;
+    replacementsFor(sp.core.toLowerCase()).forEach(function (r) {
+      cands.push({ idx: idx, rep: r });
+    });
+  });
+  if (cands.length < 3) return [];
+  // Каждый дистрактор — замена в РАЗНОМ токене (разнообразие)
+  const picked = [];
+  const usedIdx = {};
+  shuffle(cands).forEach(function (c) {
+    if (picked.length >= 3 || usedIdx[c.idx]) return;
+    usedIdx[c.idx] = true;
+    picked.push(applyReplacement(tokens, c.idx, c.rep));
+  });
+  return picked.length >= 3 ? picked : [];
+}
+
+// Данные для формата «дополни реплику»: выбор значимого слова
+// с максимумом близких замен. Возвращает { tokens, gapIdx, options, correct } или null.
+const GAP_STOP = {
+  'el': 1, 'la': 1, 'los': 1, 'las': 1, 'un': 1, 'una': 1, 'unos': 1, 'unas': 1,
+  'y': 1, 'o': 1, 'de': 1, 'del': 1, 'en': 1, 'a': 1, 'al': 1, 'que': 1,
+  'por': 1, 'para': 1, 'con': 1, 'me': 1, 'te': 1, 'se': 1, 'lo': 1,
+  'mi': 1, 'tu': 1, 'su': 1, 'yo': 1, 'tú': 1, 'él': 1, 'ella': 1,
+  'nosotros': 1, 'vosotros': 1, 'ellos': 1, 'ellas': 1, 'sí': 1, 'no': 1,
+  'hola': 1, 'gracias': 1, 'perdón': 1, 'perdone': 1
+};
+
+function buildGapData(line) {
+  const tokens = dlgTokens(line.es);
+  let best = null;
+  tokens.forEach(function (t, idx) {
+    const sp = splitToken(t);
+    if (!sp) return;
+    const low = sp.core.toLowerCase();
+    if (GAP_STOP[low] || sp.core.length < 3) return;
+    const reps = replacementsFor(low);
+    if (reps.length < 3) return;
+    if (!best || reps.length > best.reps.length) best = { idx: idx, core: sp.core, reps: reps };
+  });
+  if (!best) return null;
+  const options = shuffle([best.core.toLowerCase()].concat(shuffle(best.reps).slice(0, 3)));
+  return { tokens: tokens, gapIdx: best.idx, options: options, correct: best.core };
+}
+
+// ---------- Доступность форматов и выбор ----------
+function dialogFormatAvailable(line, f) {
+  const tokens = dlgTokens(line.es);
+  switch (f) {
+    case 'choice': return buildCloseDistractions(line).length >= 3;
+    case 'build': return tokens.length >= 2 && tokens.length <= 8;
+    case 'input': return !!line.es;
+    case 'gap': return buildGapData(line) !== null;
+    default: return true;
+  }
+}
+
+// Формат для текущего показа: желаемый по кругу, если недоступен — следующий
+function pickDialogFormat(line, want) {
+  const order = [want].concat(DIALOG_FORMATS.filter(function (f) { return f !== want; }));
+  for (let i = 0; i < order.length; i++) {
+    if (dialogFormatAvailable(line, order[i])) return order[i];
+  }
+  return 'recall';
+}
+
+// ---------- Шаг тренировки ----------
 function trainStep() {
   if (!dialogView.queue.length) { finishDialogTrain(); return; }
   updateTrainProgress();
@@ -761,79 +976,258 @@ function trainStep() {
   const action = el('chat-action');
   action.innerHTML = '';
 
-  // Контекст: реплика собеседника, предшествующая твоей
+  // Контекст: реплика собеседника, предшествующая твоей (без перевода —
+  // иначе он подсказывает ответ)
   const prev = d.lines[item.i - 1];
   if (prev && prev.who === 'other') {
     appendRoleLabel(d.role);
-    appendBubble(prev, { tr: false });
+    appendBubble(prev, { tr: false, ru: false });
   }
 
-  // Задание: твоя реплика по-русски
-  const task = document.createElement('div');
-  task.className = 'chat-task pop';
-  task.innerHTML =
-    '<div class="word-mode">твой ход</div>' +
-    '<div class="word-front" style="font-size:20px">' + esc(line.ru) + '</div>';
-  feed.appendChild(task);
+  // Формат: по кругу choice → build → input → gap
+  const want = DIALOG_FORMATS[dialogView.step % DIALOG_FORMATS.length];
+  dialogView.step++;
+  item.mode = pickDialogFormat(line, want);
 
-  const options = buildDialogOptions(line);
-  if (options.length >= 4) {
-    // Выбор из четырёх вариантов
-    const opts = document.createElement('div');
-    opts.className = 'options';
-    options.forEach(function (opt) {
-      const b = document.createElement('button');
-      b.className = 'option';
-      b.textContent = opt;
-      b.addEventListener('click', function () {
-        const ok = normalizeKey(opt) === normalizeKey(line.es);
-        opts.querySelectorAll('.option').forEach(function (x) {
-          x.disabled = true;
-          if (normalizeKey(x.textContent) === normalizeKey(line.es)) x.style.borderColor = 'var(--ok)';
-          else if (x.textContent === opt && !ok) x.style.borderColor = 'var(--err)';
-        });
-        settleTrain(item, opt, ok);
-      });
-      opts.appendChild(b);
-    });
-    action.appendChild(opts);
+  // Для gap карточка задания своя (реплика с пропуском + перевод),
+  // для остальных — задание с русским переводом
+  if (item.mode === 'gap') {
+    renderGapTask(action, item, line);
   } else {
-    // Самопроверка: вспомни вслух, покажи реплику, оцени себя честно
-    const box = document.createElement('div');
-    box.className = 'options';
-    const show = document.createElement('button');
-    show.className = 'btn-secondary';
-    show.textContent = 'Показать испанскую реплику';
-    show.addEventListener('click', function () {
-      show.classList.add('hidden');
-      const ans = document.createElement('div');
-      ans.className = 'chat-task pop';
-      ans.innerHTML =
-        '<div class="word-mode">проверка</div>' +
-        '<div class="word-front" style="font-size:20px">' + esc(line.es) + '</div>' +
-        (line.tr ? '<div class="word-tr">' + esc(line.tr) + '</div>' : '');
-      feed.appendChild(ans);
-      scrollFeed();
-      const known = document.createElement('button');
-      known.className = 'option';
-      known.textContent = 'Вспомнил';
-      known.addEventListener('click', function () { settleTrain(item, '', true); });
-      const unknown = document.createElement('button');
-      unknown.className = 'option';
-      unknown.textContent = 'Не вспомнил';
-      unknown.addEventListener('click', function () { settleTrain(item, '', false); });
-      box.appendChild(known);
-      box.appendChild(unknown);
-    });
-    box.appendChild(show);
-    action.appendChild(box);
+    const task = document.createElement('div');
+    task.className = 'chat-task pop';
+    task.innerHTML =
+      '<div class="word-mode">твой ход · ' + DIALOG_FORMAT_LABELS[item.mode] + '</div>' +
+      '<div class="word-front" style="font-size:20px">' + esc(line.ru) + '</div>';
+    feed.appendChild(task);
+
+    if (item.mode === 'choice') renderChoiceTask(action, item, line);
+    else if (item.mode === 'build') renderBuildTask(action, item, line);
+    else if (item.mode === 'input') renderInputTask(action, item, line);
+    else renderRecallTask(action, item, line);
   }
   scrollFeed();
 }
 
-// Результат хода: пузырь твоей реплики появляется в чате,
-// при ошибке реплика возвращается в конец очереди (не больше 2 кругов)
-function settleTrain(item, chosenEs, ok) {
+// ---------- Формат «выбери реплику» (близкие дистракторы) ----------
+function renderChoiceTask(action, item, line) {
+  const options = shuffle([line.es].concat(buildCloseDistractions(line)));
+  const opts = document.createElement('div');
+  opts.className = 'options';
+  options.forEach(function (opt) {
+    const b = document.createElement('button');
+    b.className = 'option';
+    b.textContent = opt;
+    b.addEventListener('click', function () {
+      const ok = normalizeKey(opt) === normalizeKey(line.es);
+      opts.querySelectorAll('.option').forEach(function (x) {
+        x.disabled = true;
+        if (normalizeKey(x.textContent) === normalizeKey(line.es)) x.style.borderColor = 'var(--ok)';
+        else if (x.textContent === opt && !ok) x.style.borderColor = 'var(--err)';
+      });
+      setTimeout(function () { settleTrain(item, opt, ok, {}); }, 300);
+    });
+    opts.appendChild(b);
+  });
+  action.appendChild(opts);
+}
+
+// ---------- Формат «собери реплику» (плитки) ----------
+function renderBuildTask(action, item, line) {
+  const tokens = dlgTokens(line.es);
+  const order = shuffle(tokens.map(function (t, i) { return { t: t, i: i }; }));
+
+  const box = document.createElement('div');
+  box.innerHTML =
+    '<div class="build-slots" id="bslots"><span class="slot-empty">Нажимай слова в правильном порядке</span></div>' +
+    '<div class="build-tokens" id="btokens"></div>' +
+    '<button class="btn-ghost" id="breset" style="margin-top:8px">Сбросить</button>';
+  action.appendChild(box);
+
+  const chosen = [];
+
+  function refresh() {
+    const slots = el('bslots');
+    slots.innerHTML = '';
+    if (!chosen.length) {
+      slots.innerHTML = '<span class="slot-empty">Нажимай слова в правильном порядке</span>';
+    } else {
+      chosen.forEach(function (c) {
+        const s = document.createElement('span');
+        s.className = 'tile-in-slot';
+        s.textContent = c.t;
+        slots.appendChild(s);
+      });
+    }
+    order.forEach(function (o) {
+      const tile = el('dtile-' + o.i);
+      if (tile) tile.classList.toggle('used', chosen.some(function (c) { return c.i === o.i; }));
+    });
+    if (chosen.length === order.length) {
+      // Автопроверка: сравниваем нормализованные последовательности
+      const built = chosen.map(function (c) { return dlgNormToken(c.t); }).join(' ');
+      const right = tokens.map(dlgNormToken).join(' ');
+      settleTrain(item, '', built === right,
+        { builtOrder: chosen.map(function (c) { return c.t; }).join(' ') });
+    }
+  }
+
+  order.forEach(function (o) {
+    const b = document.createElement('button');
+    b.className = 'tile';
+    b.id = 'dtile-' + o.i;
+    b.textContent = o.t;
+    b.addEventListener('click', function () {
+      if (chosen.length === order.length) return;
+      chosen.push(o);
+      refresh();
+    });
+    el('btokens').appendChild(b);
+  });
+
+  el('breset').addEventListener('click', function () {
+    chosen.length = 0;
+    refresh();
+  });
+}
+
+// ---------- Формат «впиши реплику» ----------
+function renderInputTask(action, item, line) {
+  const box = document.createElement('div');
+  box.className = 'dialog-input';
+
+  const hintLine = document.createElement('div');
+  hintLine.className = 'hint-line';
+  hintLine.textContent = '​'; // невидимый символ, чтобы блок имел высоту
+  box.appendChild(hintLine);
+
+  const inp = document.createElement('input');
+  inp.id = 'dlg-input-answer';
+  inp.placeholder = 'Впиши реплику на испанском';
+  inp.autocomplete = 'off';
+  box.appendChild(inp);
+
+  let hintLen = 0;
+  const hintBtn = document.createElement('button');
+  hintBtn.className = 'btn-secondary';
+  hintBtn.textContent = 'Открыть букву';
+  hintBtn.addEventListener('click', function () {
+    if (hintLen < line.es.length) {
+      hintLen++;
+      hintLine.textContent = line.es.slice(0, hintLen) + '•'.repeat(line.es.length - hintLen);
+      hapticLight();
+    }
+  });
+
+  const dontBtn = document.createElement('button');
+  dontBtn.className = 'btn-dontknow';
+  dontBtn.textContent = 'Не знаю';
+  dontBtn.addEventListener('click', function () { settleTrain(item, '', false, {}); });
+
+  const row = document.createElement('div');
+  row.className = 'input-row';
+  row.appendChild(hintBtn);
+  row.appendChild(dontBtn);
+  box.appendChild(row);
+
+  const btn = document.createElement('button');
+  btn.className = 'btn-primary';
+  btn.textContent = 'Ответить';
+  box.appendChild(btn);
+
+  action.appendChild(box);
+
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); submitDialogInput(item, line); }
+  });
+  btn.addEventListener('click', function () { submitDialogInput(item, line); });
+  try { inp.focus(); } catch (e) {}
+}
+
+function submitDialogInput(item, line) {
+  const val = el('dlg-input-answer').value;
+  if (!val.trim()) { toast('Сначала впиши реплику — или нажми «Не знаю»'); return; }
+  // Прощающее сравнение: регистр, ударения и пунктуация не важны
+  const ok = normalizeAnswer(val) === normalizeAnswer(line.es);
+  settleTrain(item, val, ok, {});
+}
+
+// ---------- Формат «дополни реплику» (пропуск) ----------
+function renderGapTask(action, item, line) {
+  const data = buildGapData(line);
+  if (!data) { item.mode = 'recall'; renderRecallTask(action, item, line); return; }
+  item.gapData = data;
+
+  const feed = el('chat-feed');
+  const masked = data.tokens.map(function (t, i) {
+    return i === data.gapIdx ? '___' : t;
+  }).join(' ');
+
+  const ans = document.createElement('div');
+  ans.className = 'chat-task pop';
+  ans.innerHTML =
+    '<div class="word-mode">твой ход · дополни реплику</div>' +
+    '<div class="word-front" style="font-size:20px">' + esc(masked) + '</div>' +
+    '<div class="word-tr">' + esc(line.ru) + '</div>';
+  feed.appendChild(ans);
+
+  const opts = document.createElement('div');
+  opts.className = 'options';
+  data.options.forEach(function (opt) {
+    const b = document.createElement('button');
+    b.className = 'option';
+    b.textContent = opt;
+    b.addEventListener('click', function () {
+      const ok = normalizeKey(opt) === normalizeKey(data.correct);
+      opts.querySelectorAll('.option').forEach(function (x) {
+        x.disabled = true;
+        if (normalizeKey(x.textContent) === normalizeKey(data.correct)) x.style.borderColor = 'var(--ok)';
+        else if (x.textContent === opt && !ok) x.style.borderColor = 'var(--err)';
+      });
+      setTimeout(function () { settleTrain(item, opt, ok, {}); }, 300);
+    });
+    opts.appendChild(b);
+  });
+  action.appendChild(opts);
+}
+
+// ---------- Запасной формат «вспомни реплику» ----------
+function renderRecallTask(action, item, line) {
+  const box = document.createElement('div');
+  box.className = 'options';
+  const show = document.createElement('button');
+  show.className = 'btn-secondary';
+  show.textContent = 'Показать испанскую реплику';
+  show.addEventListener('click', function () {
+    show.classList.add('hidden');
+    const ans = document.createElement('div');
+    ans.className = 'chat-task pop';
+    ans.innerHTML =
+      '<div class="word-mode">проверка</div>' +
+      '<div class="word-front" style="font-size:20px">' + esc(line.es) + '</div>' +
+      (line.tr ? '<div class="word-tr">' + esc(line.tr) + '</div>' : '');
+    el('chat-feed').appendChild(ans);
+    scrollFeed();
+    const known = document.createElement('button');
+    known.className = 'option';
+    known.textContent = 'Вспомнил';
+    known.addEventListener('click', function () { settleTrain(item, '', true, {}); });
+    const unknown = document.createElement('button');
+    unknown.className = 'option';
+    unknown.textContent = 'Не вспомнил';
+    unknown.addEventListener('click', function () { settleTrain(item, '', false, {}); });
+    box.appendChild(known);
+    box.appendChild(unknown);
+  });
+  box.appendChild(show);
+  action.appendChild(box);
+}
+
+// ---------- Итог хода ----------
+// Пузырь правильной реплики появляется в чате, ниже — пояснение при ошибке.
+// При ошибке реплика возвращается в конец очереди (не больше 2 кругов).
+function settleTrain(item, chosenEs, ok, extra) {
+  extra = extra || {};
   const line = dialogView.dialog.lines[item.i];
   dialogView.answered++;
   if (ok) dialogView.correct++;
@@ -843,18 +1237,40 @@ function settleTrain(item, chosenEs, ok) {
   if (!ok) {
     item.tries++;
     if (item.tries < 2) dialogView.queue.push(item);
-    const feed = el('chat-feed');
-    const note = document.createElement('div');
-    note.className = 'fix-note';
-    note.textContent = 'Ошибка. Правильная реплика — в пузыре выше' +
-      (chosenEs ? ': ты выбрал «' + chosenEs + '»' : '') + '.';
-    feed.appendChild(note);
   }
   dialogView.queue.shift();
 
+  // Пояснение, что именно ты сделал не так
+  let wrongNote = '';
+  if (!ok) {
+    if (item.mode === 'build' && extra.builtOrder) {
+      wrongNote = 'У тебя собрано: «' + extra.builtOrder + '»';
+    } else if (chosenEs) {
+      wrongNote = (item.mode === 'input' ? 'Ты написал: «' : 'Ты выбрал: «') + chosenEs + '»';
+    }
+  }
+
   const action = el('chat-action');
-  action.innerHTML = '<button id="chat-next" class="btn-primary">Дальше</button>';
-  el('chat-next').addEventListener('click', trainStep);
+  const fb = document.createElement('div');
+  fb.className = 'feedback pop ' + (ok ? 'ok' : 'err');
+  let html = '<div class="fb-title">' + (ok ? 'Верно!' : 'Неверно') + '</div>';
+  if (wrongNote) html += '<div class="fb-hinted">' + esc(wrongNote) + '</div>';
+  html += '<div class="fb-answer">' + esc(line.es) + '</div>';
+  if (line.tr) html += '<div class="fb-tr">' + esc(line.tr) + '</div>';
+  html += '<div class="fb-ex">' + esc(line.ru) + '</div>';
+  html += '<button class="btn-primary" id="chat-next-fb">Дальше</button>';
+  fb.innerHTML = html;
+
+  const sp = document.createElement('button');
+  sp.className = 'speak-btn';
+  sp.setAttribute('aria-label', 'Озвучить');
+  sp.innerHTML = SPEAK_ICON;
+  sp.addEventListener('click', function () { speak(line.es); });
+  fb.insertBefore(sp, fb.querySelector('#chat-next-fb'));
+
+  action.innerHTML = '';
+  action.appendChild(fb);
+  el('chat-next-fb').addEventListener('click', trainStep);
   scrollFeed();
 }
 
@@ -1182,7 +1598,7 @@ function bindDialogs() {
 }
 
 // app.js инициализируется раньше (его скрипт подключён выше),
-// поэтому к этому моменту его утилиты уже определены.
+// поэтому к этому моменту его утилиты и база уже готовы.
 document.addEventListener('DOMContentLoaded', function () {
   loadDialogStore();
   bindDialogs();
