@@ -1,15 +1,13 @@
 'use strict';
 /* ============================================================
-   ОСНОВНАЯ ЛОГИКА ПРИЛОЖЕНИЯ «Испанский каждый день» — версия 2
-   Изменения против твоей версии:
-   - добавлен режим «Диалоги» (данные и логика — в dialogs.js):
-     в базе появились db.dialogs (свои диалоги) и
-     db.progress.dialogs (прогресс по диалогам);
-   - восстановлена функция esc(): в присланной копии замены шли
-     на сами символы (&amp; превратился в & при копировании из чата),
-     из-за чего экранирование не работало;
-   - при восстановлении бэкапа диалоги тоже переносятся;
-   - при смене экрана останавливается проигрывание диалога.
+   ОСНОВНАЯ ЛОГИКА ПРИЛОЖЕНИЯ «Испанский каждый день» — версия 3
+   Изменения против версии 2:
+   - график активности и кольцевая диаграмма помещаются в жёсткий
+     контейнер фиксированной высоты (функция chartBox): раньше
+     высота держалась ненадёжно, и канвас мог бесконечно
+     пересчитывать сам себя, растягивая страницу вниз;
+   - при пустых данных контейнер скрывается целиком.
+   Остальное — как в версии 2 (режим «Диалоги» живёт в dialogs.js).
    Хранилище — localStorage. Библиотеки — Telegram WebApp, Chart.js.
    ============================================================ */
 
@@ -625,6 +623,28 @@ function cssVar(name, fallback) {
   return v || fallback;
 }
 
+// Жёсткий контейнер для графика. Chart.js берёт высоту из родительского
+// элемента; если у родителя высота не задана, канвас начинает бесконечно
+// пересчитывать сам себя и растягивает страницу вниз. Обёртка с фиксированной
+// высотой 220px делает такой рост невозможным.
+function chartBox(canvas) {
+  const parent = canvas.parentElement;
+  if (parent && parent.classList.contains('chart-box')) return parent;
+  const box = document.createElement('div');
+  box.className = 'chart-box';
+  box.style.position = 'relative';
+  box.style.height = '220px';
+  if (canvas.parentNode) {
+    canvas.parentNode.insertBefore(box, canvas);
+    box.appendChild(canvas);
+  }
+  // Сбрасываем размеры, оставшиеся от прошлой отрисовки, —
+  // Chart.js выставит правильные сам.
+  canvas.style.width = '';
+  canvas.style.height = '';
+  return box;
+}
+
 // График активности по дням
 function renderActivityChart() {
   const canvas = el('chart-activity');
@@ -648,14 +668,14 @@ function renderActivityChart() {
 
   const total = values.reduce(function (s, v) { return s + v; }, 0);
   if (charts.activity) { charts.activity.destroy(); charts.activity = null; }
+  const box = chartBox(canvas);
   if (!total) {
     empty.classList.remove('hidden');
-    canvas.style.display = 'none';
+    box.style.display = 'none';
     return;
   }
   empty.classList.add('hidden');
-  canvas.style.display = 'block';
-  canvas.style.height = '220px';
+  box.style.display = 'block';
 
   charts.activity = new Chart(canvas, {
     type: 'bar',
@@ -682,8 +702,12 @@ function renderStatusChart() {
   const learned = db.words.filter(function (w) { return w.status === 'learned'; }).length;
   const learning = db.words.filter(function (w) { return w.status === 'learning'; }).length;
   const fresh = db.words.filter(function (w) { return w.status === 'new'; }).length;
-  if (!learned && !learning && !fresh) return;
-  canvas.style.height = '220px';
+  const box = chartBox(canvas);
+  if (!learned && !learning && !fresh) {
+    box.style.display = 'none';
+    return;
+  }
+  box.style.display = 'block';
 
   charts.status = new Chart(canvas, {
     type: 'doughnut',
